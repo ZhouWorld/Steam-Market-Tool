@@ -1,0 +1,17 @@
+{
+  "wearLabels": {
+    "Factory New": "崭新出厂",
+    "Minimal Wear": "略有磨损",
+    "Field-Tested": "久经沙场",
+    "Well-Worn": "破损不堪",
+    "Battle-Scarred": "战痕累累"
+  },
+  "weaponCases": [
+    {
+      "name": "千瓦武器箱",
+      "appid": 730,
+      "market_hash_name": "Kilowatt Case",
+      "is_skin": false
+    }
+  ]
+}
