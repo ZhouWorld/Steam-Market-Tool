@@ -24,7 +24,7 @@
 // @require      https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
 // @resource     chartjs_css https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
 // @grant        GM_getResourceText
-// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/75b1649d26dce8f6ef5bfd13de85fc13/raw/5a85ed02808528d4ec7a475b626ac7d3ed9f4dc1/myConfig.json
+// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/75b1649d26dce8f6ef5bfd13de85fc13/raw/70e7f35e00fe004a4accb4f1bf6a272af4579711/myConfig.json
 // ==/UserScript==
 
 let currentNameListPage = 1;
