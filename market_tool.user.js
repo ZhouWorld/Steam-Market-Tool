@@ -22,10 +22,12 @@
 // @connect      steamcommunity.com
 // @connect      cdnjs.cloudflare.com
 // @require      https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
+// @require https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js
 // @resource     chartjs_css https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
 // @grant        GM_getResourceText
-// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/75b1649d26dce8f6ef5bfd13de85fc13/raw/59aaa1e8127b420b0b1f451960ef01fddce9ab8a/myConfig.json
+// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/d307da0dd8dd38fd62675dd5236bd2c0074c558f/myConfig.json5
 // ==/UserScript==
+
 
 let currentNameListPage = 1;
 const NAME_LIST_PAGE_SIZE = 10;
@@ -350,12 +352,31 @@ async function initializeData() {
 
     return dataLoadPromise;
 }
-//外部链接读取配置
-const raw = GM_getResourceText('myConfig');
-const config = JSON.parse(raw);
 
-const WEAR_LABELS = config.wearLabels;
-const WEAPON_CASES = config.weaponCases;
+
+// ============================================================
+// 读取远程配置（兼容 JSON 和 JSON5）
+// ============================================================
+const raw = GM_getResourceText('myConfig');
+
+let config;
+try {
+    // 优先尝试 JSON5（如果引了 JSON5 库）
+    if (typeof JSON5 !== 'undefined') {
+        config = JSON5.parse(raw);
+    } else {
+        config = JSON.parse(raw);
+    }
+} catch (e) {
+    console.error('❌ 解析 myConfig 失败:', e);
+    config = { wearLabels: {}, weaponCases: [] };
+}
+
+const WEAR_LABELS     = config.wearLabels     || {};
+const WEAR_PARAM_MAP  = config.wearParamMap   || {};
+const QUALITY_LABELS  = config.qualityLabels  || {};
+const QUALITY_PREFIX  = config.qualityPrefixMap || {};
+const WEAPON_CASES    = config.weaponCases    || [];
 /***
 // ---------- 配置 ----------
 const WEAR_LABELS = {
@@ -960,12 +981,18 @@ function isMultisellPage() {
     return window.location.pathname.includes('/market/multisell');
 }
 
-function getMarketHashName(item, wear) {
-    if (item.is_skin) {
-        const w = wear || item.default_wear;
-        return item.base_name + ' (' + w + ')';
+function getMarketHashName(item, wear, quality) {
+    if (!item.is_skin) {
+        return item.market_hash_name;
     }
-    return item.market_hash_name;
+
+    const w = wear || item.default_wear;
+    const q = quality || item.default_quality || 'normal';
+
+    // 品质前缀
+    const prefix = QUALITY_PREFIX[q] || '';
+
+    return prefix + item.base_name + ' (' + w + ')';
 }
 
 function getItemUrl(item, wear) {
@@ -974,9 +1001,13 @@ function getItemUrl(item, wear) {
 
 function getWearLabel(item, wear) {
     if (!item.is_skin) return '';
-    return (item.wear_labels && item.wear_labels[wear]) || wear || '';
+    return (item.wear_labels && item.wear_labels[wear]) || WEAR_LABELS[wear] || wear || '';
 }
 
+function getQualityLabel(item, quality) {
+    if (!item.is_skin) return '';
+    return QUALITY_LABELS[quality] || quality || '';
+}
 // ---------- 获取当前页面的武器箱 ----------
 // ---------- 从详情页读取当前磨损 ----------
 function readCurrentWearFromPage(item) {
@@ -1025,13 +1056,15 @@ function getCurrentCase() {
         if (item.url) {
             if (currentUrl === item.url || currentUrl === item.url + '/') {
                 return {
-                    item: item,
-                    wear: item.is_skin ? readCurrentWearFromPage(item) : null
-                };
+    item: item,
+    wear: item.is_skin ? readCurrentWearFromPage(item) : null,
+    quality: item.is_skin ? (item.default_quality || 'normal') : null
+};
             }
         }
     }
 
+    // ② 从 URL 抓 G... id 反查
     // ② 从 URL 抓 G... id 反查
     const urlMatch = currentUrl.match(/\/listings\/\d+\/(G[A-F0-9]+)/i);
     if (urlMatch) {
@@ -1040,7 +1073,8 @@ function getCurrentCase() {
             if (item.url && item.url.toUpperCase().indexOf(id) !== -1) {
                 return {
                     item: item,
-                    wear: item.is_skin ? readCurrentWearFromPage(item) : null
+                    wear: item.is_skin ? readCurrentWearFromPage(item) : null,
+                    quality: item.is_skin ? (item.default_quality || 'normal') : null
                 };
             }
         }
@@ -2315,6 +2349,50 @@ GM_addStyle(`
     border-top: 1px solid #1a2634;
     margin-top: 8px;
     flex-wrap: wrap;
+}
+
+.quality-switcher {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    background: rgba(0,0,0,0.15);
+    border-radius: 6px;
+    border-left: 3px solid #ffd93d;
+    flex-wrap: wrap;
+}
+
+.quality-switcher .quality-label {
+    font-size: 11px;
+    color: #8b9aab;
+    margin-right: 2px;
+    flex-shrink: 0;
+}
+
+.quality-switcher .quality-btn {
+    background: transparent;
+    color: #8b9aab;
+    border: 1px solid #2a3f5e;
+    border-radius: 4px;
+    padding: 2px 10px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+    white-space: nowrap;
+}
+
+.quality-switcher .quality-btn:hover {
+    background: #2a3f5e;
+    color: #c6d4df;
+}
+
+.quality-switcher .quality-btn.active {
+    background: #ffd93d;
+    color: #1a2634;
+    border-color: #ffd93d;
+    font-weight: bold;
 }
 
 .name-list-pagination button {
@@ -4031,9 +4109,12 @@ async function renderAllData(allData, expandIndex) {
                 if (allData[k].index === i) { entry = allData[k]; break; }
             }
             var wear = entry && entry.currentWear
-                ? entry.currentWear
-                : (item.is_skin ? item.default_wear : null);
-            var mhn = getMarketHashName(item, wear);
+    ? entry.currentWear
+    : (item.is_skin ? item.default_wear : null);
+var quality = entry && entry.currentQuality
+    ? entry.currentQuality
+    : (item.is_skin ? item.default_quality : null);
+var mhn = getMarketHashName(item, wear, quality);
 
             var count = countInventoryItems(inventoryData, mhn);
             inventoryMap[i] = {
@@ -4059,7 +4140,8 @@ async function renderAllData(allData, expandIndex) {
         var invCount = inventoryMap[index] || null;
 
         var currentWear = dataItem.currentWear || null;
-        html += buildCaseHTMLWithPagination_Enhanced(caseItem, result, index, paginated, invCount, currentWear);
+        var currentQuality = dataItem.currentQuality || null;
+        html += buildCaseHTMLWithPagination_Enhanced(caseItem, result, index, paginated, invCount, currentWear, currentQuality);
     }
 
     if (!html) {
@@ -4389,20 +4471,21 @@ async function switchWear(caseIndex, newWear) {
     }
     if (!entry) return;
 
-    if (entry.currentWear === newWear && entry.result && entry.result.sellOrders) {
-        return;
-    }
+    var currentQuality = entry.currentQuality || item.default_quality || 'normal';
+
+    if (entry.currentWear === newWear) return;
 
     var itemEl = document.querySelector('.case-item[data-case-index="' + caseIndex + '"]');
     if (itemEl) itemEl.classList.add('wear-loading');
 
-    var marketHashName = getMarketHashName(item, newWear);
+    var marketHashName = getMarketHashName(item, newWear, currentQuality);
 
     try {
         var data = await fetchOrderBook(item.appid, marketHashName);
         var result = parseOrderBook(data);
 
         entry.currentWear = newWear;
+        // currentQuality 保持不变
         entry.result = result;
         entry.currentPage = 1;
         entry.error = null;
@@ -4411,6 +4494,47 @@ async function switchWear(caseIndex, newWear) {
     } catch (e) {
         console.error('切换磨损失败:', e);
         showChartMessage('❌ 切换磨损失败: ' + e.message, 'error');
+    } finally {
+        if (itemEl) itemEl.classList.remove('wear-loading');
+    }
+}
+
+async function switchQuality(caseIndex, newQuality) {
+    var item = WEAPON_CASES[caseIndex];
+    if (!item || !item.is_skin) return;
+
+    var content = document.getElementById('case-content');
+    var allData = content._allData;
+    if (!allData) return;
+
+    var entry = null;
+    for (var i = 0; i < allData.length; i++) {
+        if (allData[i].index === caseIndex) { entry = allData[i]; break; }
+    }
+    if (!entry) return;
+
+    var currentWear = entry.currentWear || item.default_wear;
+
+    if (entry.currentQuality === newQuality) return;
+
+    var itemEl = document.querySelector('.case-item[data-case-index="' + caseIndex + '"]');
+    if (itemEl) itemEl.classList.add('wear-loading');
+
+    var marketHashName = getMarketHashName(item, currentWear, newQuality);
+
+    try {
+        var data = await fetchOrderBook(item.appid, marketHashName);
+        var result = parseOrderBook(data);
+
+        entry.currentQuality = newQuality;
+        entry.result = result;
+        entry.currentPage = 1;
+        entry.error = null;
+
+        await renderAllData(allData, caseIndex);
+    } catch (e) {
+        console.error('切换品质失败:', e);
+        showChartMessage('❌ 切换品质失败: ' + e.message, 'error');
     } finally {
         if (itemEl) itemEl.classList.remove('wear-loading');
     }
@@ -4508,15 +4632,18 @@ listeners.push({ type: 'click', listener: nameListener });
         if (allData[i].index === caseIndex) { entry = allData[i]; break; }
     }
     var wear = entry && entry.currentWear
-        ? entry.currentWear
-        : (caseItem.is_skin ? caseItem.default_wear : null);
-    var mhn = getMarketHashName(caseItem, wear);
+    ? entry.currentWear
+    : (caseItem.is_skin ? caseItem.default_wear : null);
+var quality = entry && entry.currentQuality
+    ? entry.currentQuality
+    : (caseItem.is_skin ? caseItem.default_quality : null);
+var mhn = getMarketHashName(caseItem, wear, quality);
 
-    openChart({
-        appid: caseItem.appid,
-        market_hash_name: mhn,
-        name: caseItem.name + (caseItem.is_skin ? ' (' + getWearLabel(caseItem, wear) + ')' : '')
-    });
+openChart({
+    appid: caseItem.appid,
+    market_hash_name: mhn,
+    name: caseItem.name + (caseItem.is_skin ? ' (' + getWearLabel(caseItem, wear) + ' · ' + getQualityLabel(caseItem, quality) + ')' : '')
+});
 };
 
     content.addEventListener('click', chartListener);
@@ -4675,9 +4802,25 @@ var nameListPageListener = function(e) {
 
     var allData = document.getElementById('case-content')._allData || [];
     renderAllData(allData);
+
+
 };
 content.addEventListener('click', nameListPageListener);
 listeners.push({ type: 'click', listener: nameListPageListener });
+
+      // 14. 品质切换按钮
+    var qualityListener = function(e) {
+        var btn = e.target.closest('.quality-btn');
+        if (!btn) return;
+        e.stopPropagation();
+        e.preventDefault();
+
+        var caseIndex = parseInt(btn.dataset.index);
+        var newQuality = btn.dataset.quality;
+        switchQuality(caseIndex, newQuality);
+    };
+    content.addEventListener('click', qualityListener);
+    listeners.push({ type: 'click', listener: qualityListener });
 
     // 存储监听器引用以便移除
     content._eventListeners = listeners;
@@ -4707,7 +4850,7 @@ function changePage(caseIndex, page) {
 // 使用 API 获取的可交易数量来决定颜色状态
 // ============================================================
 
-function buildCaseHTMLWithPagination_Enhanced(item, result, index, paginated, inventoryCount, currentWear) {
+function buildCaseHTMLWithPagination_Enhanced(item, result, index, paginated, inventoryCount, currentWear, currentQuality) {
     var pageData = paginated.pageData;
     var totalPages = paginated.totalPages;
     var currentPage = paginated.currentPage;
@@ -4830,21 +4973,48 @@ function buildCaseHTMLWithPagination_Enhanced(item, result, index, paginated, in
         var wearButtons = '';
         var activeWear = currentWear || item.default_wear;
         item.wears.forEach(function(w) {
-            var isActive = (w === activeWear);
-            var label = (item.wear_labels && item.wear_labels[w]) || w;
-            wearButtons +=
-                '<button class="wear-btn' + (isActive ? ' active' : '') + '"' +
-                ' data-index="' + index + '"' +
-                ' data-wear="' + w + '"' +
-                ' title="' + item.base_name + ' (' + w + ')">' +
-                label +
-                '</button>';
-        });
+    var isActive = (w === activeWear);
+    var label = getWearLabel(item, w);                    // ⭐ 统一走 getWearLabel
+    var fullName = getMarketHashName(item, w, currentQuality || item.default_quality || 'normal');
+    wearButtons +=
+        '<button class="wear-btn' + (isActive ? ' active' : '') + '"' +
+        ' data-index="' + index + '"' +
+        ' data-wear="' + w + '"' +
+        ' title="' + fullName + '">' +                     // ⭐ tooltip 显示完整英文名，便于核对
+        label +
+        '</button>';
+});
 
         wearSwitcherHtml =
             '<div class="wear-switcher" data-index="' + index + '">' +
                 '<span class="wear-label">磨损:</span>' +
                 wearButtons +
+            '</div>';
+    }
+
+    // ---- 品质切换器 ----
+    var qualitySwitcherHtml = '';
+    if (item.is_skin && item.qualities && item.qualities.length > 1) {
+        var qualityButtons = '';
+        var activeQuality = currentQuality || item.default_quality || 'normal';
+
+        item.qualities.forEach(function(q) {
+            var isActive = (q === activeQuality);
+            var label = getQualityLabel(item, q);
+            var fullName = getMarketHashName(item, currentWear || item.default_wear, q);
+            qualityButtons +=
+                '<button class="quality-btn' + (isActive ? ' active' : '') + '"' +
+                ' data-index="' + index + '"' +
+                ' data-quality="' + q + '"' +
+                ' title="' + fullName + '">' +
+                label +
+                '</button>';
+        });
+
+        qualitySwitcherHtml =
+            '<div class="quality-switcher" data-index="' + index + '">' +
+                '<span class="quality-label">品质:</span>' +
+                qualityButtons +
             '</div>';
     }
 
@@ -4951,6 +5121,7 @@ function buildCaseHTMLWithPagination_Enhanced(item, result, index, paginated, in
             <div class="case-orders">
                 ${inventoryRowHtml}
                 ${wearSwitcherHtml}
+                ${qualitySwitcherHtml}
                 ${ordersHtml}
                 ${paginationHtml}
             </div>
@@ -5341,7 +5512,8 @@ async function loadAllData() {
             }
         }
 
-        var marketHashName = getMarketHashName(item, initialWear);
+        var initialQuality = item.default_quality || 'normal';
+        var marketHashName = getMarketHashName(item, initialWear, initialQuality);
         status.textContent = '正在获取: ' + item.name + ' (' + (i + 1) + '/' + totalCount + ')';
 
         try {
@@ -5349,19 +5521,21 @@ async function loadAllData() {
             var result = parseOrderBook(data);
             successCount++;
             allData.push({
-                index: originalIndex,
-                result: result,
-                currentPage: 1,
-                currentWear: initialWear
-            });
+    index: originalIndex,
+    result: result,
+    currentPage: 1,
+    currentWear: initialWear,
+    currentQuality: item.default_quality || 'normal'   // ⭐ 新增
+});
         } catch (e) {
             allData.push({
-                index: originalIndex,
-                result: { sellOrders: [], lowestSell: 0, sellCount: 0 },
-                error: e.message,
-                currentPage: 1,
-                currentWear: initialWear
-            });
+        index: originalIndex,
+        result: { sellOrders: [], lowestSell: 0, sellCount: 0 },
+        error: e.message,
+        currentPage: 1,
+        currentWear: initialWear,
+        currentQuality: item.default_quality || 'normal'
+    });
         }
     }
 
@@ -5415,12 +5589,17 @@ async function loadDataForCurrentCase() {
             throw new Error('未找到匹配的物品');
         }
 
+      var currentQuality = matched.quality || (currentCase.is_skin ? currentCase.default_quality : null);
+      var marketHashName = getMarketHashName(currentCase, currentWear, currentQuality);
+
+
         var allData = [{
-            index: index,
-            result: result,
-            currentPage: 1,
-            currentWear: currentWear
-        }];
+        index: index,
+        result: result,
+        currentPage: 1,
+        currentWear: currentWear,
+        currentQuality: currentQuality
+    }];
 
         content._allData = allData;
         renderAllData(allData);
@@ -5478,7 +5657,10 @@ for (var ri = 0; ri < allDataRef.length; ri++) {
 var wear = entryRef && entryRef.currentWear
     ? entryRef.currentWear
     : (item.is_skin ? item.default_wear : null);
-var marketHashName = getMarketHashName(item, wear);
+var quality = entryRef && entryRef.currentQuality
+    ? entryRef.currentQuality
+    : (item.is_skin ? item.default_quality : null);
+var marketHashName = getMarketHashName(item, wear, quality);
 
 var data = await fetchOrderBook(item.appid, marketHashName);
 
@@ -5631,9 +5813,12 @@ async function handleSell(index, isBatch) {
         if (allData[i].index === index) { entry = allData[i]; break; }
     }
     var wear = entry && entry.currentWear
-        ? entry.currentWear
-        : (item.is_skin ? item.default_wear : null);
-    var marketHashName = getMarketHashName(item, wear);
+    ? entry.currentWear
+    : (item.is_skin ? item.default_wear : null);
+var quality = entry && entry.currentQuality
+    ? entry.currentQuality
+    : (item.is_skin ? item.default_quality : null);
+var marketHashName = getMarketHashName(item, wear, quality);
 
     var inventoryData = await getInventoryData();
     if (!inventoryData || !inventoryData.success) {
