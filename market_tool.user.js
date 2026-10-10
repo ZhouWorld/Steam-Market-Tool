@@ -25,7 +25,7 @@
 // @require https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js
 // @resource     chartjs_css https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
 // @grant        GM_getResourceText
-// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/a0ec926bbcb3302baaba1abcbc9f457850e490f5/myConfig.json5
+// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/60a7aba43f06e3ca43257adddb95561274f5c1c8/myConfig.json5
 // ==/UserScript==
 
 // ---------- 挂单数据缓存 ----------
