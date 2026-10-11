@@ -22,7 +22,7 @@
 // @connect      steamcommunity.com
 // @connect      cdnjs.cloudflare.com
 // @require      https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
-// @require https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js
+// @require      https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js
 // @resource     chartjs_css https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
 // @grant        GM_getResourceText
 // @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/4795088ca8dee16191957981e3d6f354f925b385/myConfig.json5
