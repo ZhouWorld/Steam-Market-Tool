@@ -12,7 +12,7 @@
 // @grant        GM_getResourceText
 // @grant        GM_getResourceURL
 // @grant        GM_addElement
-// @grant        GM_setValue
+// @grant        GM_setValuegit add market_tool.user.js
 // @grant        GM_getValue
 // @grant        GM_deleteValue
 // @grant        GM_addValueChangeListener
