@@ -12,7 +12,7 @@
 // @grant        GM_getResourceText
 // @grant        GM_getResourceURL
 // @grant        GM_addElement
-// @grant        GM_setValuegit add market_tool.user.js
+// @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
 // @grant        GM_addValueChangeListener
@@ -25,7 +25,7 @@
 // @require      https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js
 // @resource     chartjs_css https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
 // @grant        GM_getResourceText
-// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/4795088ca8dee16191957981e3d6f354f925b385/myConfig.json5
+// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/59c6549fef55a01f5c77e0168df2fac8fb1d24f8/myConfig.json5
 // ==/UserScript==
 
 // ---------- 挂单数据缓存 ----------
