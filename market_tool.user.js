@@ -3223,23 +3223,6 @@ function showItemListDialog(config) {
     </div>`;
         }
 
-        var iconEl = overlay.querySelector('.item-list-icon');
-        if (iconEl && iconEl.tagName === 'IMG') {
-            var lowRes = iconEl.src;
-            var highRes = iconEl.dataset.highRes || lowRes;
-
-            iconEl.addEventListener('mouseenter', function () {
-                if (highRes && this.src !== highRes) {
-                    this.src = highRes;
-                }
-            });
-            iconEl.addEventListener('mouseleave', function () {
-                if (this.src !== lowRes) {
-                    this.src = lowRes;
-                }
-            });
-        }
-
         // ⭐ 图标 URL
         var iconUrl = config.iconUrl || '';
 
@@ -3277,6 +3260,25 @@ function showItemListDialog(config) {
             ${paginationHtml}
         </div>
     </div>`;
+
+        // ⭐ 图标 hover 时切换到高清
+        var iconEl = overlay.querySelector('.item-list-icon');
+        if (iconEl && iconEl.tagName === 'IMG') {
+            var lowRes = iconEl.src;
+            // ⭐ 从 config 里拿高清 URL（需要外面传进来）
+            var highRes = config.iconUrlHighRes || lowRes.replace(/64fx64f/, '256fx256f');
+
+            iconEl.addEventListener('mouseenter', function () {
+                if (highRes && this.src !== highRes) {
+                    this.src = highRes;
+                }
+            });
+            iconEl.addEventListener('mouseleave', function () {
+                if (this.src !== lowRes) {
+                    this.src = lowRes;
+                }
+            });
+        }
 
         // ---- 绑定事件 ----
         var closeBtn = overlay.querySelector('.item-list-close');
@@ -4920,9 +4922,25 @@ function createChartOverlay() {
             </div>
         </div>
     `;
-    console.log('[debug] close 按钮?', !!overlay.querySelector('.item-list-close'));
-    console.log('[debug] toolbar?', !!overlay.querySelector('.item-list-batch-toolbar'));
-    console.log('[debug] innerHTML 长度', overlay.innerHTML.length);
+    // ⭐ 图标 hover 切高清（事件委托，翻页后依然有效）
+    overlay.addEventListener('mouseover', function (e) {
+        var img = e.target.closest('.item-list-icon');
+        if (!img || img.tagName !== 'IMG') return;
+        if (!img.dataset.lowRes) {
+            img.dataset.lowRes = img.src;
+            img.dataset.highRes = config.iconUrlHighRes || img.src.replace(/64fx64f/, '256fx256f');
+        }
+        if (img.dataset.highRes && img.src !== img.dataset.highRes) {
+            img.src = img.dataset.highRes;
+        }
+    });
+    overlay.addEventListener('mouseout', function (e) {
+        var img = e.target.closest('.item-list-icon');
+        if (!img || img.tagName !== 'IMG') return;
+        if (img.dataset.lowRes && img.src !== img.dataset.lowRes) {
+            img.src = img.dataset.lowRes;
+        }
+    });
 
     document.body.appendChild(overlay);
 
