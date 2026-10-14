@@ -3243,16 +3243,15 @@ function showItemListDialog(config) {
         // ⭐ 图标 URL
         var iconUrl = config.iconUrl || '';
 
-        // ⭐ 图标 HTML
+        // ⭐ 图标 HTML（无边框）
         var iconHtml = iconUrl
             ? '<img class="item-list-icon" src="' +
               iconUrl +
               '" alt="" ' +
-              'style="width:32px; height:32px; margin-right:10px; flex-shrink:0; ' +
-              'border:1px solid #2a3f5e; border-radius:4px; background:rgba(0,0,0,0.2);">'
+              'style="width:32px; height:32px; margin-right:10px; flex-shrink:0;">'
             : '<div class="item-list-icon" style="width:32px; height:32px; margin-right:10px; flex-shrink:0; ' +
-              'border:1px solid #2a3f5e; border-radius:4px; background:rgba(0,0,0,0.2); ' +
               'display:flex; align-items:center; justify-content:center; color:#4a5a6a; font-size:14px;">?</div>';
+
         overlay.innerHTML = `
     <div class="item-list-dialog">
         <div class="item-list-header">
@@ -3279,29 +3278,13 @@ function showItemListDialog(config) {
         </div>
     </div>`;
 
-        // ⭐ 图标 hover 时切换到高清
-        var iconEl = overlay.querySelector('.item-list-icon');
-        if (iconEl && iconEl.tagName === 'IMG') {
-            var lowRes = iconEl.src;
-            // ⭐ 从 config 里拿高清 URL（需要外面传进来）
-            var highRes = config.iconUrlHighRes || lowRes.replace(/64fx64f/, '256fx256f');
-
-            iconEl.addEventListener('mouseenter', function () {
-                if (highRes && this.src !== highRes) {
-                    this.src = highRes;
-                }
-            });
-            iconEl.addEventListener('mouseleave', function () {
-                if (this.src !== lowRes) {
-                    this.src = lowRes;
-                }
+        // ---- 绑定事件 ----
+        var closeBtn = overlay.querySelector('.item-list-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', function () {
+                overlay.remove();
             });
         }
-
-        // ---- 绑定事件 ----
-        overlay.querySelector('.item-list-close').addEventListener('click', function () {
-            overlay.remove();
-        });
 
         overlay.querySelectorAll('.item-list-page-btn').forEach(function (btn) {
             btn.addEventListener('click', function () {
@@ -3313,11 +3296,14 @@ function showItemListDialog(config) {
             });
         });
 
-        overlay.querySelector('.item-list-page-size').addEventListener('change', function () {
-            pageSize = parseInt(this.value) || 50;
-            currentPage = 1;
-            render();
-        });
+        var pageSizeSelect = overlay.querySelector('.item-list-page-size');
+        if (pageSizeSelect) {
+            pageSizeSelect.addEventListener('change', function () {
+                pageSize = parseInt(this.value) || 50;
+                currentPage = 1;
+                render();
+            });
+        }
 
         // 行内自定义事件绑定
         if (rowActions && typeof rowActions.bind === 'function') {
@@ -3340,132 +3326,134 @@ function showItemListDialog(config) {
             var batchModifyBtn = overlay.querySelector('.item-list-batch-modify-btn');
             var batchRemoveBtn = overlay.querySelector('.item-list-batch-remove-btn');
 
-            // ⭐ 收集"勾选了 + 该行价格改了"的项
-            function getSelectedItemsWithPrices() {
-                var result = [];
-                overlay.querySelectorAll('.item-list-check:checked').forEach(function (cb) {
-                    var rowIdx = parseInt(cb.dataset.rowIndex);
-                    var rowEl = overlay.querySelector('.item-list-row[data-row-index="' + rowIdx + '"]');
-                    if (!rowEl) return;
+            if (batchCountEl && batchModifyBtn && batchRemoveBtn) {
+                // ⭐ 收集"勾选了 + 该行价格改了"的项
+                function getSelectedItemsWithPrices() {
+                    var result = [];
+                    overlay.querySelectorAll('.item-list-check:checked').forEach(function (cb) {
+                        var rowIdx = parseInt(cb.dataset.rowIndex);
+                        var rowEl = overlay.querySelector('.item-list-row[data-row-index="' + rowIdx + '"]');
+                        if (!rowEl) return;
 
-                    var priceInput = rowEl.querySelector('.item-list-price-input');
-                    if (!priceInput) return;
+                        var priceInput = rowEl.querySelector('.item-list-price-input');
+                        if (!priceInput) return;
 
-                    var newPrice = parseFloat(priceInput.value);
-                    if (isNaN(newPrice) || newPrice < 0.01) return;
+                        var newPrice = parseFloat(priceInput.value);
+                        if (isNaN(newPrice) || newPrice < 0.01) return;
 
-                    var item = items[rowIdx];
-                    if (!item) return;
+                        var item = items[rowIdx];
+                        if (!item) return;
 
-                    var newCents = Math.round(newPrice * 100);
-                    if (newCents === item.price) return; // 价格没变，跳过
+                        var newCents = Math.round(newPrice * 100);
+                        if (newCents === item.price) return; // 价格没变，跳过
 
-                    result.push({
-                        item: item,
-                        rowIdx: rowIdx,
-                        newPriceCents: newCents
+                        result.push({
+                            item: item,
+                            rowIdx: rowIdx,
+                            newPriceCents: newCents
+                        });
                     });
+                    return result;
+                }
+
+                // ⭐ 收集"勾选了"的所有项（批量撤销用，不管价格有没有改）
+                function getSelectedItems() {
+                    var result = [];
+                    overlay.querySelectorAll('.item-list-check:checked').forEach(function (cb) {
+                        var rowIdx = parseInt(cb.dataset.rowIndex);
+                        var item = items[rowIdx];
+                        if (item) result.push(item);
+                    });
+                    return result;
+                }
+
+                function updateBatchBtnState() {
+                    var checkedCount = overlay.querySelectorAll('.item-list-check:checked').length;
+                    batchCountEl.textContent = '已选 ' + checkedCount + ' 项';
+
+                    // ⭐ 批量修改按钮：勾选 + 有改价
+                    var validForModify = getSelectedItemsWithPrices();
+                    if (validForModify.length > 0) {
+                        batchModifyBtn.disabled = false;
+                        batchModifyBtn.style.background = 'rgba(46,160,67,0.2)';
+                        batchModifyBtn.style.color = '#8bc34a';
+                        batchModifyBtn.style.borderColor = 'rgba(139,195,74,0.3)';
+                        batchModifyBtn.style.cursor = 'pointer';
+                        batchModifyBtn.title = '批量修改 ' + validForModify.length + ' 项';
+                    } else {
+                        batchModifyBtn.disabled = true;
+                        batchModifyBtn.style.background = 'rgba(46,160,67,0.15)';
+                        batchModifyBtn.style.color = '#4a6a4a';
+                        batchModifyBtn.style.borderColor = 'rgba(139,195,74,0.15)';
+                        batchModifyBtn.style.cursor = 'not-allowed';
+                        batchModifyBtn.title = checkedCount === 0 ? '请先勾选物品' : '请填写每行的新价格';
+                    }
+
+                    // ⭐ 批量撤销按钮：只要勾选就可点
+                    if (checkedCount > 0) {
+                        batchRemoveBtn.disabled = false;
+                        batchRemoveBtn.style.background = 'rgba(220,53,69,0.2)';
+                        batchRemoveBtn.style.color = '#e57373';
+                        batchRemoveBtn.style.borderColor = 'rgba(220,53,69,0.35)';
+                        batchRemoveBtn.style.cursor = 'pointer';
+                        batchRemoveBtn.title = '批量撤销 ' + checkedCount + ' 项';
+                    } else {
+                        batchRemoveBtn.disabled = true;
+                        batchRemoveBtn.style.background = 'rgba(220,53,69,0.15)';
+                        batchRemoveBtn.style.color = '#4a6a4a';
+                        batchRemoveBtn.style.borderColor = 'rgba(220,53,69,0.15)';
+                        batchRemoveBtn.style.cursor = 'not-allowed';
+                        batchRemoveBtn.title = '请先勾选要撤销的物品';
+                    }
+                }
+
+                // 复选框变化
+                overlay.querySelectorAll('.item-list-check').forEach(function (cb) {
+                    cb.addEventListener('change', updateBatchBtnState);
                 });
-                return result;
-            }
 
-            // ⭐ 收集"勾选了"的所有项（批量撤销用，不管价格有没有改）
-            function getSelectedItems() {
-                var result = [];
-                overlay.querySelectorAll('.item-list-check:checked').forEach(function (cb) {
-                    var rowIdx = parseInt(cb.dataset.rowIndex);
-                    var item = items[rowIdx];
-                    if (item) result.push(item);
+                // 监听所有价格输入框的变化
+                overlay.querySelectorAll('.item-list-price-input').forEach(function (inp) {
+                    inp.addEventListener('input', updateBatchBtnState);
                 });
-                return result;
+
+                // ⭐ 点击"批量修改"
+                batchModifyBtn.addEventListener('click', async function () {
+                    if (this.disabled) return;
+                    var selected = getSelectedItemsWithPrices();
+                    if (selected.length === 0) return;
+
+                    if (rowActions && typeof rowActions.onBatchModify === 'function') {
+                        rowActions.onBatchModify(selected, {
+                            close: function () {
+                                overlay.remove();
+                            }
+                        });
+                    } else {
+                        console.warn('[showItemListDialog] rowActions.onBatchModify 未定义');
+                    }
+                });
+
+                // ⭐ 点击"批量撤销"
+                batchRemoveBtn.addEventListener('click', async function () {
+                    if (this.disabled) return;
+                    var selected = getSelectedItems();
+                    if (selected.length === 0) return;
+
+                    if (rowActions && typeof rowActions.onBatchRemove === 'function') {
+                        rowActions.onBatchRemove(selected, {
+                            close: function () {
+                                overlay.remove();
+                            }
+                        });
+                    } else {
+                        console.warn('[showItemListDialog] rowActions.onBatchRemove 未定义');
+                    }
+                });
+
+                // 初始化
+                updateBatchBtnState();
             }
-
-            function updateBatchBtnState() {
-                var checkedCount = overlay.querySelectorAll('.item-list-check:checked').length;
-                batchCountEl.textContent = '已选 ' + checkedCount + ' 项';
-
-                // ⭐ 批量修改按钮：勾选 + 有改价
-                var validForModify = getSelectedItemsWithPrices();
-                if (validForModify.length > 0) {
-                    batchModifyBtn.disabled = false;
-                    batchModifyBtn.style.background = 'rgba(46,160,67,0.2)';
-                    batchModifyBtn.style.color = '#8bc34a';
-                    batchModifyBtn.style.borderColor = 'rgba(139,195,74,0.3)';
-                    batchModifyBtn.style.cursor = 'pointer';
-                    batchModifyBtn.title = '批量修改 ' + validForModify.length + ' 项';
-                } else {
-                    batchModifyBtn.disabled = true;
-                    batchModifyBtn.style.background = 'rgba(46,160,67,0.15)';
-                    batchModifyBtn.style.color = '#4a6a4a';
-                    batchModifyBtn.style.borderColor = 'rgba(139,195,74,0.15)';
-                    batchModifyBtn.style.cursor = 'not-allowed';
-                    batchModifyBtn.title = checkedCount === 0 ? '请先勾选物品' : '请填写每行的新价格';
-                }
-
-                // ⭐ 批量撤销按钮：只要勾选就可点
-                if (checkedCount > 0) {
-                    batchRemoveBtn.disabled = false;
-                    batchRemoveBtn.style.background = 'rgba(220,53,69,0.2)';
-                    batchRemoveBtn.style.color = '#e57373';
-                    batchRemoveBtn.style.borderColor = 'rgba(220,53,69,0.35)';
-                    batchRemoveBtn.style.cursor = 'pointer';
-                    batchRemoveBtn.title = '批量撤销 ' + checkedCount + ' 项';
-                } else {
-                    batchRemoveBtn.disabled = true;
-                    batchRemoveBtn.style.background = 'rgba(220,53,69,0.15)';
-                    batchRemoveBtn.style.color = '#4a6a4a';
-                    batchRemoveBtn.style.borderColor = 'rgba(220,53,69,0.15)';
-                    batchRemoveBtn.style.cursor = 'not-allowed';
-                    batchRemoveBtn.title = '请先勾选要撤销的物品';
-                }
-            }
-
-            // 复选框变化
-            overlay.querySelectorAll('.item-list-check').forEach(function (cb) {
-                cb.addEventListener('change', updateBatchBtnState);
-            });
-
-            // 监听所有价格输入框的变化
-            overlay.querySelectorAll('.item-list-price-input').forEach(function (inp) {
-                inp.addEventListener('input', updateBatchBtnState);
-            });
-
-            // ⭐ 点击"批量修改"
-            batchModifyBtn.addEventListener('click', async function () {
-                if (this.disabled) return;
-                var selected = getSelectedItemsWithPrices();
-                if (selected.length === 0) return;
-
-                if (rowActions && typeof rowActions.onBatchModify === 'function') {
-                    rowActions.onBatchModify(selected, {
-                        close: function () {
-                            overlay.remove();
-                        }
-                    });
-                } else {
-                    console.warn('[showItemListDialog] rowActions.onBatchModify 未定义');
-                }
-            });
-
-            // ⭐ 点击"批量撤销"
-            batchRemoveBtn.addEventListener('click', async function () {
-                if (this.disabled) return;
-                var selected = getSelectedItems();
-                if (selected.length === 0) return;
-
-                if (rowActions && typeof rowActions.onBatchRemove === 'function') {
-                    rowActions.onBatchRemove(selected, {
-                        close: function () {
-                            overlay.remove();
-                        }
-                    });
-                } else {
-                    console.warn('[showItemListDialog] rowActions.onBatchRemove 未定义');
-                }
-            });
-
-            // 初始化
-            updateBatchBtnState();
         }
     }
 
@@ -4932,6 +4920,9 @@ function createChartOverlay() {
             </div>
         </div>
     `;
+    console.log('[debug] close 按钮?', !!overlay.querySelector('.item-list-close'));
+    console.log('[debug] toolbar?', !!overlay.querySelector('.item-list-batch-toolbar'));
+    console.log('[debug] innerHTML 长度', overlay.innerHTML.length);
 
     document.body.appendChild(overlay);
 
