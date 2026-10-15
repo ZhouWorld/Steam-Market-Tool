@@ -25,7 +25,7 @@
 // @require      https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js
 // @resource     chartjs_css https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
 // @grant        GM_getResourceText
-// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/2b41ff3e404edf136d4775d2e2bfe55582433b8c/myConfig.json5
+// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/9bf694dd620a20bdebc6dd6a16380a779b77e4cf/myConfig.json5
 // ==/UserScript==
 
 // ---------- orderbook 缓存 ----------
@@ -553,6 +553,294 @@ function calculateFromSellerAmount(desiredAmount, walletInfo, publisherFee) {
         }
     };
 }
+
+// ============================================================
+// 价格计算器：双向联动买家支付 / 卖家实收
+// ============================================================
+function showFeeCalculator() {
+    var symbol = getCurrencySymbol();
+    var walletInfo = getWalletInfo();
+    var publisherFee = parseFloat(walletInfo.wallet_publisher_fee_percent_default) || 0.1;
+
+    // 防止重复打开
+    var existing = document.getElementById('fee-calc-overlay');
+    if (existing) existing.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'fee-calc-overlay';
+    overlay.style.cssText = `
+        position: fixed; top:0; left:0; right:0; bottom:0;
+        background: rgba(0,0,0,0.7);
+        z-index: 10010;
+        display: flex; justify-content:center; align-items:center;
+        backdrop-filter: blur(4px);
+    `;
+
+    overlay.innerHTML = `
+        <div style="
+            background: rgba(27, 40, 56, 0.98);
+            border: 1px solid #2a3f5e;
+            border-radius: 12px;
+            padding: 24px 28px;
+            max-width: 420px;
+            width: 100%;
+            margin: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+            font-family: 'Motiva Sans', Arial, sans-serif;
+            color: #c6d4df;
+        ">
+            <div style="text-align:center; font-size:15px; font-weight:bold; color:#66c0f4; margin-bottom:16px;">
+                🧮 价格计算器
+            </div>
+
+            <div style="margin-bottom:12px;">
+                <label style="font-size:12px; color:#8b9aab; display:block; margin-bottom:4px;">
+                    买家支付 (${symbol})
+                </label>
+                <input id="calc-buyer" type="number" step="0.01" min="0"
+                    placeholder="0.00"
+                    style="width:100%; padding:8px 12px; background:rgba(0,0,0,0.3);
+                           color:#ff6b6b; border:1px solid #2a3f5e; border-radius:4px;
+                           font-size:14px; font-family:inherit; box-sizing:border-box;">
+            </div>
+
+            <div style="text-align:center; color:#4a5a6a; font-size:12px; margin:-4px 0 8px 0;">⇅</div>
+
+            <div style="margin-bottom:12px;">
+                <label style="font-size:12px; color:#8b9aab; display:block; margin-bottom:4px;">
+                    卖家实收 (${symbol})
+                </label>
+                <input id="calc-seller" type="number" step="0.01" min="0"
+                    placeholder="0.00"
+                    style="width:100%; padding:8px 12px; background:rgba(0,0,0,0.3);
+                           color:#8bc34a; border:1px solid #2a3f5e; border-radius:4px;
+                           font-size:14px; font-family:inherit; box-sizing:border-box;">
+            </div>
+
+                        <div style="margin-bottom:12px;">
+                <label style="font-size:12px; color:#8b9aab; display:block; margin-bottom:4px;">
+                    入库价格 (${symbol}) <span style="color:#4a5a6a; font-size:11px;">（可选）</span>
+                </label>
+                <input id="calc-cost" type="number" step="0.01" min="0"
+                    placeholder="0.00"
+                    style="width:100%; padding:8px 12px; background:rgba(0,0,0,0.3);
+                           color:#c6d4df; border:1px solid #2a3f5e; border-radius:4px;
+                           font-size:14px; font-family:inherit; box-sizing:border-box;">
+            </div>
+
+            <div id="calc-detail" style="
+                background: rgba(0,0,0,0.2);
+                border-radius: 6px;
+                padding: 10px 12px;
+                margin-bottom: 12px;
+                font-size: 12px;
+                min-height: 80px;
+                line-height: 1.7;
+                display: none;
+            ">
+                <div style="display:flex; justify-content:space-between;">
+                    <span style="color:#8b9aab;">买家支付</span>
+                    <span id="calc-d-buyer" style="color:#ff6b6b;">--</span>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                    <span style="color:#8b9aab;">卖家实收</span>
+                    <span id="calc-d-seller" style="color:#8bc34a; font-weight:bold;">--</span>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                    <span style="color:#8b9aab;">Steam 手续费</span>
+                    <span id="calc-d-steam" style="color:#ffd93d;">--</span>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                    <span style="color:#8b9aab;">发行商手续费</span>
+                    <span id="calc-d-pub" style="color:#ffd93d;">--</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; border-top:1px solid rgba(255,255,255,0.05); margin-top:4px; padding-top:4px;">
+                    <span style="color:#8b9aab;">总手续费</span>
+                    <span id="calc-d-total" style="color:#ff6b6b;">--</span>
+                </div>
+                                <div style="display:flex; justify-content:space-between; font-size:10px; color:#4a6a8a;">
+                    <span id="calc-d-percent"></span>
+                </div>
+                <div id="calc-d-discount-row" style="display:none; justify-content:space-between; border-top:1px solid rgba(255,255,255,0.05); margin-top:4px; padding-top:4px;">
+                    <span style="color:#8b9aab;">折扣率</span>
+                    <span id="calc-d-discount" style="color:#66c0f4; font-weight:bold;">--</span>
+                </div>
+
+            </div>
+
+            <div style="display:flex; gap:8px; justify-content:flex-end;">
+                <button id="calc-clear-btn" style="
+                    background: transparent; color:#8b9aab;
+                    border:1px solid #2a3f5e; border-radius:4px;
+                    padding:6px 20px; font-size:12px; cursor:pointer;
+                    font-family:inherit;">清空</button>
+                <button id="calc-close-btn" style="
+                    background:#2a5a7a; color:#c6d4df; border:none;
+                    border-radius:4px; padding:6px 24px; font-size:12px;
+                    cursor:pointer; font-family:inherit;">关闭</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    var buyerInput = overlay.querySelector('#calc-buyer');
+    var sellerInput = overlay.querySelector('#calc-seller');
+    var costInput = overlay.querySelector('#calc-cost');
+    var detailBox = overlay.querySelector('#calc-detail');
+    var discountRow = overlay.querySelector('#calc-d-discount-row');
+    var discountEl = overlay.querySelector('#calc-d-discount');
+
+    // 同步标志位，防止死循环
+    var syncing = false;
+
+    var formatMoney = function (cents) {
+        return symbol + ' ' + (cents / 100).toFixed(2);
+    };
+
+    function renderDetail(feeInfo) {
+        detailBox.style.display = 'block';
+        overlay.querySelector('#calc-d-buyer').textContent = formatMoney(feeInfo.buyerPrice);
+        overlay.querySelector('#calc-d-seller').textContent = formatMoney(feeInfo.sellerAmount);
+        overlay.querySelector('#calc-d-steam').textContent = formatMoney(feeInfo.steamFee);
+        overlay.querySelector('#calc-d-pub').textContent = formatMoney(feeInfo.publisherFee);
+        overlay.querySelector('#calc-d-total').textContent =
+            formatMoney(feeInfo.totalFees) + ' (' + feeInfo.feePercentage.toFixed(2) + '%)';
+        overlay.querySelector('#calc-d-percent').textContent = feeInfo.walletInfo.useRound
+            ? '货币策略：四舍五入'
+            : '货币策略：向下取整';
+
+        // ⭐ 折扣率 = 入库价格 / 卖家实收 × 100%
+        updateDiscount(feeInfo.sellerAmount);
+    }
+
+    // ⭐ 折扣率计算与渲染
+    function updateDiscount(sellerCents) {
+        if (!sellerCents || sellerCents <= 0) {
+            discountRow.style.display = 'none';
+            return;
+        }
+        var costVal = parseFloat(costInput.value);
+        if (isNaN(costVal) || costVal <= 0) {
+            discountRow.style.display = 'none';
+            return;
+        }
+        var costCents = Math.round(costVal * 100);
+        var rawRate = (costCents / sellerCents) * 100; // 例如 74.62686
+        // ⭐ 保留两位小数，向上取整
+        var rate = Math.ceil(rawRate * 100) / 100;
+        discountEl.textContent = rate.toFixed(2) + '%';
+        discountRow.style.display = 'flex';
+
+        // ⭐ 若想"整数部分取整、无小数"用：
+        // var rate = Math.ceil(rawRate);
+        // discountEl.textContent = rate + '%';
+    }
+
+    function clearDetail() {
+        detailBox.style.display = 'none';
+    }
+
+    // 用户输入买家支付 → 计算卖家实收
+    buyerInput.addEventListener('input', function () {
+        if (syncing) return;
+        var val = parseFloat(this.value);
+        if (isNaN(val) || val <= 0) {
+            sellerInput.value = '';
+            clearDetail();
+            return;
+        }
+        var buyerCents = Math.round(val * 100);
+        if (buyerCents < 1) {
+            sellerInput.value = '';
+            clearDetail();
+            return;
+        }
+        var feeInfo = calculateSteamFees(buyerCents, walletInfo, publisherFee);
+
+        syncing = true;
+        sellerInput.value = (feeInfo.sellerAmount / 100).toFixed(2);
+        syncing = false;
+
+        renderDetail(feeInfo);
+    });
+
+    // ⭐ 入库价格变化 → 重算折扣率
+    costInput.addEventListener('input', function () {
+        // 从当前买家支付反推 sellerAmount 用于算折扣
+        var buyerVal = parseFloat(buyerInput.value);
+        if (isNaN(buyerVal) || buyerVal <= 0) {
+            discountRow.style.display = 'none';
+            return;
+        }
+        var buyerCents = Math.round(buyerVal * 100);
+        if (buyerCents < 1) {
+            discountRow.style.display = 'none';
+            return;
+        }
+        var feeInfo = calculateSteamFees(buyerCents, walletInfo, publisherFee);
+        updateDiscount(feeInfo.sellerAmount);
+    });
+
+    // 用户输入卖家实收 → 反推买家支付
+    sellerInput.addEventListener('input', function () {
+        if (syncing) return;
+        var val = parseFloat(this.value);
+        if (isNaN(val) || val <= 0) {
+            buyerInput.value = '';
+            clearDetail();
+            return;
+        }
+        var sellerCents = Math.round(val * 100);
+        if (sellerCents < 1) {
+            buyerInput.value = '';
+            clearDetail();
+            return;
+        }
+        // 用卖家实收直接正推买家支付（不需要二分）
+        var feeInfo = calculateFromSellerAmount(sellerCents, walletInfo, publisherFee);
+
+        syncing = true;
+        buyerInput.value = (feeInfo.buyerPrice / 100).toFixed(2);
+        syncing = false;
+
+        renderDetail(feeInfo);
+    });
+
+    // 清空
+    overlay.querySelector('#calc-clear-btn').addEventListener('click', function () {
+        buyerInput.value = '';
+        sellerInput.value = '';
+        costInput.value = '';
+        discountRow.style.display = 'none';
+        clearDetail();
+        buyerInput.focus();
+    });
+
+    // 关闭
+    function close() {
+        overlay.remove();
+        document.removeEventListener('keydown', escHandler);
+    }
+    overlay.querySelector('#calc-close-btn').addEventListener('click', close);
+
+    // 点击外部关闭
+    overlay.addEventListener('click', function (e) {
+        if (e.target === this) close();
+    });
+
+    // ESC 关闭
+    var escHandler = function (e) {
+        if (e.key === 'Escape') close();
+    };
+    document.addEventListener('keydown', escHandler);
+
+    // 自动聚焦
+    setTimeout(function () {
+        buyerInput.focus();
+    }, 100);
+}
+
 // ============================================================
 // 新增：费用显示弹窗
 // ============================================================
@@ -3983,18 +4271,27 @@ async function showActiveListingsDialog(caseIndex) {
 
     var rowActions = {
         priceInput: function (rowItem) {
+            // ⭐ 计算卖家实收
+            var walletInfo = getWalletInfo();
+            var publisherFee = parseFloat(walletInfo.wallet_publisher_fee_percent_default) || 0.1;
+            var feeInfo = calculateSteamFees(rowItem.price, walletInfo, publisherFee);
+            var sellerText = formatPrice(feeInfo.sellerAmount);
+
             // ⭐ 同时渲染 span 和 input，初始只显示 span
-            return `<span class="item-list-price-text"
-                    data-listingid="${rowItem.listingid}"
-                    style="cursor:pointer; color:#8bc34a; font-weight:500;"
-                    title="点击修改价格">${formatPrice(rowItem.price)}</span><input type="number" step="0.01" min="0.01"
-                    class="item-list-price-input"
-                    data-listingid="${rowItem.listingid}"
-                    value="${(rowItem.price / 100).toFixed(2)}"
-                    style="display:none; width:90px; padding:3px 6px; background:rgba(0,0,0,0.3);
-                           color:#c6d4df; border:1px solid #2a3f5e; border-radius:3px;
-                           font-size:11px; font-family:inherit; text-align:center;
-                           box-sizing:border-box;">`;
+            return `<div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
+            <span class="item-list-price-text"
+                data-listingid="${rowItem.listingid}"
+                style="cursor:pointer; color:#8bc34a; font-weight:500;"
+                title="点击修改价格">${formatPrice(rowItem.price)}</span><input type="number" step="0.01" min="0.01"
+                class="item-list-price-input"
+                data-listingid="${rowItem.listingid}"
+                value="${(rowItem.price / 100).toFixed(2)}"
+                style="display:none; width:90px; padding:3px 6px; background:rgba(0,0,0,0.3);
+                       color:#c6d4df; border:1px solid #2a3f5e; border-radius:3px;
+                       font-size:11px; font-family:inherit; text-align:center;
+                       box-sizing:border-box;">
+            <span class="item-list-seller-text" style="font-size:10px; color:#8b9aab;" title="扣除手续费后实际到账">实收 ${sellerText}</span>
+        </div>`;
         },
         sellBtn: function (rowItem) {
             return `
@@ -4051,6 +4348,19 @@ async function showActiveListingsDialog(caseIndex) {
                     modifyBtn.style.borderColor = 'rgba(139,195,74,0.15)';
                     modifyBtn.style.cursor = 'not-allowed';
                     modifyBtn.title = valid ? '价格未变化' : '请先填写售价';
+                }
+
+                // ⭐ 新增：更新"实收"文字
+                var sellerEl = rowEl.querySelector('.item-list-seller-text');
+                if (sellerEl) {
+                    if (valid) {
+                        var walletInfo = getWalletInfo();
+                        var publisherFee = parseFloat(walletInfo.wallet_publisher_fee_percent_default) || 0.1;
+                        var feeInfo = calculateSteamFees(Math.round(val * 100), walletInfo, publisherFee);
+                        sellerEl.textContent = '实收 ' + formatPrice(feeInfo.sellerAmount);
+                    } else {
+                        sellerEl.textContent = '实收 --';
+                    }
                 }
             }
 
@@ -5496,7 +5806,13 @@ function renderChart(data, title, range, useDayAggregation) {
                             var label = context.dataset.label || '';
                             var value = context.parsed.y;
                             if (context.dataset.label === '价格中位数' || context.dataset.label === '日价格中位数') {
-                                return label + ': ' + symbol + ' ' + value.toFixed(2);
+                                // ⭐ 中位数对应的卖家实收
+                                var buyerCents = Math.round(value * 100);
+                                var walletInfo = getWalletInfo();
+                                var publisherFee = parseFloat(walletInfo.wallet_publisher_fee_percent_default) || 0.1;
+                                var feeInfo = calculateSteamFees(buyerCents, walletInfo, publisherFee);
+                                var sellerText = symbol + ' ' + (feeInfo.sellerAmount / 100).toFixed(2);
+                                return label + ': ' + symbol + ' ' + value.toFixed(2) + ' (' + sellerText + ')';
                             } else if (context.dataset.label === '成交量' || context.dataset.label === '日成交量') {
                                 return label + ': ' + value.toLocaleString();
                             }
@@ -5673,9 +5989,10 @@ function createPanel() {
             </div>
         </div>
 
-        <!-- 底部原有代码保持不变 -->
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0 2px 0; border-top:1px solid #1a2634; margin-top:0px;">
-            <button id="goto-market-home-btn" style="...">🏠 主页</button>
+                <!-- 底部按钮区 -->
+        <div style="display:flex; align-items:center; gap:6px; padding:6px 0 2px 0; border-top:1px solid #1a2634; margin-top:0px;">
+            <button id="goto-market-home-btn" style="background:#2a3f5e; color:#c6d4df; border:none; border-radius:4px; padding:4px 10px; font-size:11px; cursor:pointer; font-family:inherit;">🏠 主页</button>
+            <button id="open-fee-calc-btn" style="background:#2a3f5e; color:#c6d4df; border:none; border-radius:4px; padding:4px 10px; font-size:11px; cursor:pointer; font-family:inherit;">🧮 计算价格</button>
         </div>
     `;
 
@@ -5727,6 +6044,14 @@ function createPanel() {
     if (homeBtn) {
         homeBtn.addEventListener('click', function () {
             window.location.href = 'https://steamcommunity.com/market/';
+        });
+    }
+
+    // ⭐ 新增：计算价格按钮
+    var feeCalcBtn = document.getElementById('open-fee-calc-btn');
+    if (feeCalcBtn) {
+        feeCalcBtn.addEventListener('click', function () {
+            showFeeCalculator();
         });
     }
 
@@ -8170,14 +8495,17 @@ async function showTradeableItemsDialog(caseIndex) {
 
     var rowActions = {
         priceInput: function (rowItem) {
-            return `<input type="number" step="0.01" min="0.01"
-                        class="item-list-price-input"
-                        data-assetid="${rowItem.assetid}"
-                        placeholder="0.00"
-                        style="width:90px; padding:3px 6px; background:rgba(0,0,0,0.3);
-                               color:#c6d4df; border:1px solid #2a3f5e; border-radius:3px;
-                               font-size:11px; font-family:inherit; text-align:center;
-                               box-sizing:border-box;">`;
+            return `<div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
+            <input type="number" step="0.01" min="0.01"
+                   class="item-list-price-input"
+                   data-assetid="${rowItem.assetid}"
+                   placeholder="0.00"
+                   style="width:90px; padding:3px 6px; background:rgba(0,0,0,0.3);
+                          color:#c6d4df; border:1px solid #2a3f5e; border-radius:3px;
+                          font-size:11px; font-family:inherit; text-align:center;
+                          box-sizing:border-box;">
+            <span class="item-list-seller-text" style="font-size:10px; color:#8b9aab;" title="扣除手续费后实际到账">实收 --</span>
+        </div>`;
         },
         sellBtn: function (rowItem) {
             return `<button class="item-list-sell-btn"
@@ -8212,6 +8540,18 @@ async function showTradeableItemsDialog(caseIndex) {
                     btn.style.borderColor = 'rgba(139,195,74,0.15)';
                     btn.style.cursor = 'not-allowed';
                     btn.title = '请先填写售价';
+                }
+                // ⭐ 新增：更新"实收"文字
+                var sellerEl = rowEl.querySelector('.item-list-seller-text');
+                if (sellerEl) {
+                    if (valid) {
+                        var walletInfo = getWalletInfo();
+                        var publisherFee = parseFloat(walletInfo.wallet_publisher_fee_percent_default) || 0.1;
+                        var feeInfo = calculateSteamFees(Math.round(val * 100), walletInfo, publisherFee);
+                        sellerEl.textContent = '实收 ' + formatPrice(feeInfo.sellerAmount);
+                    } else {
+                        sellerEl.textContent = '实收 --';
+                    }
                 }
             }
 
