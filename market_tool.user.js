@@ -1015,7 +1015,7 @@ function getQualityLabel(item, quality) {
     if (!item.is_skin) return '';
     return QUALITY_LABELS[quality] || quality || '';
 }
-// ---------- 获取当前页面的武器箱 ----------
+
 // ---------- 从详情页读取当前磨损 ----------
 function readCurrentWearFromPage(item) {
     if (!item.is_skin) return null;
@@ -7277,7 +7277,7 @@ function buildCaseHTMLWithPagination_Enhanced(
             '<div class="wear-switcher" data-index="' +
             index +
             '">' +
-            '<span class="wear-label">磨损:</span>' +
+            '<span class="wear-label"></span>' +
             wearButtons +
             '</div>';
     }
@@ -7313,7 +7313,7 @@ function buildCaseHTMLWithPagination_Enhanced(
             '<div class="quality-switcher" data-index="' +
             index +
             '">' +
-            '<span class="quality-label">品质:</span>' +
+            '<span class="quality-label"></span>' +
             qualityButtons +
             '</div>';
     }
