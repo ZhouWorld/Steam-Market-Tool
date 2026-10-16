@@ -25,7 +25,7 @@
 // @require      https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js
 // @resource     chartjs_css https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
 // @grant        GM_getResourceText
-// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/6fe37558289518670fbd7955bf3a0d73d43210da/myConfig.json5
+// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/5271d74057736b8d4fe809f2309a344fa083413f/myConfig.json5
 // ==/UserScript==
 
 // ---------- orderbook 缓存 ----------
@@ -824,11 +824,6 @@ function showFeeCalculator() {
     }
     overlay.querySelector('#calc-close-btn').addEventListener('click', close);
 
-    // 点击外部关闭
-    overlay.addEventListener('click', function (e) {
-        if (e.target === this) close();
-    });
-
     // ESC 关闭
     var escHandler = function (e) {
         if (e.key === 'Escape') close();
@@ -967,6 +962,7 @@ const MAX_PAGE_SIZE = 200;
 const TIME_RANGES = {
     today: { label: '本日', hours: 24 },
     week: { label: '本周', hours: 168 },
+    twoweeks: { label: '近两周', hours: 336 },
     month: { label: '本月', hours: 720 },
     year: { label: '最近一年', hours: 8760 }
 };
@@ -1184,23 +1180,25 @@ function getMultisellItems() {
 // ---------- 注入样式 ----------
 GM_addStyle(`
     .weapon-cases-panel {
-        position: fixed;
-        top: 50px;
-        right: 20px;
-        width: 420px;
-        max-height: calc(100vh - 100px);
-        background: rgba(27, 40, 56, 0.95);
-        border: 1px solid #2a3f5e;
-        border-radius: 8px;
-        padding: 12px 16px;
-        z-index: 9999;
-        font-family: "Motiva Sans", Arial, sans-serif;
-        overflow: hidden;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.7);
-        transition: none;
-        color: #c6d4df;
-        cursor: default;
-        user-select: none;
+    position: fixed;
+    top: 50px;
+    right: 20px;
+    width: 420px;
+    max-height: calc(100vh - 100px);
+    background: rgba(27, 40, 56, 0.95);
+    border: 1px solid #2a3f5e;
+    border-radius: 8px;
+    padding: 12px 16px;
+    z-index: 9999;
+    font-family: "Motiva Sans", Arial, sans-serif;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.7);
+    transition: none;
+    color: #c6d4df;
+    cursor: default;
+    user-select: none;
+    display: flex;
+    flex-direction: column;
     }
 
     .weapon-cases-panel.dragging {
@@ -1217,14 +1215,15 @@ GM_addStyle(`
     }
 
     .weapon-cases-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 10px;
-        padding-bottom: 8px;
-        border-bottom: 1px solid #2a3f5e;
-        cursor: grab;
-        min-height: 30px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #2a3f5e;
+    cursor: grab;
+    min-height: 30px;
+    flex-shrink: 0;
     }
 
     .weapon-cases-header:active {
@@ -1312,11 +1311,12 @@ GM_addStyle(`
     }
 
     .weapon-cases-content {
-        max-height: calc(100vh - 200px);
-        overflow-y: auto;
-        scrollbar-width: thin;
-        scrollbar-color: #2a3f5e transparent;
-        pointer-events: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #2a3f5e transparent;
+    pointer-events: auto;
     }
 
     .weapon-cases-panel.minimized .weapon-cases-content {
@@ -2501,6 +2501,7 @@ GM_addStyle(`
     border-bottom: 1px solid #1a2634;
     margin-bottom: 8px;
     flex-wrap: wrap;
+    flex-shrink: 0;
 }
 
 .case-search-input {
@@ -2895,6 +2896,39 @@ GM_addStyle(`
 .stock-status-select {
     font-weight: 500;
     letter-spacing: 0.3px;
+}
+
+/* ===== 图表标题内的下拉切换 ===== */
+#chart-title-text .chart-title-select {
+    background: rgba(0, 0, 0, 0.3);
+    color: #66c0f4;
+    border: 1px solid #2a3f5e;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 17px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: border-color 0.2s;
+    line-height: 1.4;
+    vertical-align: middle;
+    outline: none;
+    margin: 0 4px;
+    min-height: 32px;
+    box-sizing: border-box;
+}
+
+#chart-title-text .chart-title-select:hover {
+    border-color: #66c0f4;
+}
+
+#chart-title-text .chart-title-select:focus {
+    border-color: #66c0f4;
+    box-shadow: 0 0 8px rgba(102, 192, 244, 0.2);
+}
+
+#chart-title-text .chart-title-select option {
+    background: #1b2838;
+    color: #c6d4df;
 }
 `);
 
@@ -5194,11 +5228,12 @@ function createChartOverlay() {
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                     <span class="subtitle" id="chart-range-label">本周</span>
                     <div class="chart-time-controls" id="chart-time-controls">
-                        <button data-range="today">本日</button>
-                        <button data-range="week" class="active">本周</button>
-                        <button data-range="month">本月</button>
-                        <button data-range="year">最近一年</button>
-                        <button data-range="custom" id="custom-range-btn">📅 自定义</button>
+                      <button data-range="today">本日</button>
+                      <button data-range="week" class="active">本周</button>
+                      <button data-range="twoweeks">近两周</button>
+                      <button data-range="month">本月</button>
+                      <button data-range="year">最近一年</button>
+                      <button data-range="custom" id="custom-range-btn">📅 自定义</button>
                     </div>
                 </div>
             </div>
@@ -5232,6 +5267,41 @@ function createChartOverlay() {
             </div>
         </div>
     `;
+
+    // ⭐ 图表标题下拉切换：切换磨损/品质
+    var titleEl = overlay.querySelector('#chart-title-text');
+    if (titleEl) {
+        titleEl.addEventListener('change', function (e) {
+            var sel = e.target.closest('.chart-title-select');
+            if (!sel) return;
+
+            var type = sel.dataset.type; // 'wear' | 'quality'
+            var value = sel.value;
+
+            var cs = window._currentChartCase;
+            if (!cs || !cs.item || !cs.item.is_skin) return;
+
+            if (type === 'wear') {
+                if (cs.wear === value) return;
+                cs.wear = value;
+            } else if (type === 'quality') {
+                if (cs.quality === value) return;
+                cs.quality = value;
+            } else {
+                return;
+            }
+
+            // 重算 mhn
+            cs.market_hash_name = getMarketHashName(cs.item, cs.wear, cs.quality);
+
+            // 重渲染标题（更新下拉选中态）
+            renderChartTitle(cs);
+
+            // 重新加载图表
+            loadChartData(cs, currentTimeRange);
+        });
+    }
+
     // ⭐ 图标 hover 切高清（事件委托，翻页后依然有效）
     overlay.addEventListener('mouseover', function (e) {
         var img = e.target.closest('.item-list-icon');
@@ -5361,13 +5431,60 @@ function createChartOverlay() {
     return overlay;
 }
 
+// ⭐ 渲染图表标题（带磨损/品质下拉切换）
+function renderChartTitle(caseItem) {
+    var titleEl = document.getElementById('chart-title-text');
+    if (!titleEl) return;
+
+    var item = caseItem.item;
+    var wear = caseItem.wear;
+    var quality = caseItem.quality;
+
+    // 非皮肤：直接显示名称
+    if (!item || !item.is_skin) {
+        titleEl.innerHTML = '📊 ' + (caseItem.name || '') + ' - 成交量/价格中位数走势';
+        return;
+    }
+
+    var wears = item.wears || [];
+    var qualities = item.qualities || ['normal'];
+
+    var wearOptions = wears
+        .map(function (w) {
+            var sel = w === wear ? ' selected' : '';
+            return '<option value="' + w + '"' + sel + '>' + getWearLabel(item, w) + '</option>';
+        })
+        .join('');
+
+    var qualityOptions = qualities
+        .map(function (q) {
+            var sel = q === quality ? ' selected' : '';
+            return '<option value="' + q + '"' + sel + '>' + getQualityLabel(item, q) + '</option>';
+        })
+        .join('');
+
+    titleEl.innerHTML =
+        '📊 ' +
+        caseItem.name +
+        ' (' +
+        '<select class="chart-title-select" data-type="wear">' +
+        wearOptions +
+        '</select>' +
+        ' · ' +
+        '<select class="chart-title-select" data-type="quality">' +
+        qualityOptions +
+        '</select>' +
+        ')';
+}
+
 function openChart(caseItem) {
     const overlay = createChartOverlay();
     if (!overlay) return;
 
     window._currentChartCase = caseItem;
 
-    document.getElementById('chart-title-text').textContent = '📊 ' + caseItem.name + ' - 成交量/价格中位数走势';
+    // ⭐ 用新的标题渲染函数
+    renderChartTitle(caseItem);
 
     document.getElementById('chart-loading').style.display = 'flex';
     document.getElementById('chart-no-data').style.display = 'none';
@@ -5397,6 +5514,7 @@ function getTimeRangeHours(range) {
     var map = {
         today: 24,
         week: 168,
+        twoweeks: 336, // ⭐ 14 天
         month: 720,
         year: 8760
     };
@@ -5990,7 +6108,7 @@ function createPanel() {
         </div>
 
                 <!-- 底部按钮区 -->
-        <div style="display:flex; align-items:center; gap:6px; padding:6px 0 2px 0; border-top:1px solid #1a2634; margin-top:0px;">
+        <div style="display:flex; align-items:center; gap:6px; padding:6px 0 2px 0; border-top:1px solid #1a2634; margin-top:0px;flex-shrink:0;">
             <button id="goto-market-home-btn" style="background:#2a3f5e; color:#c6d4df; border:none; border-radius:4px; padding:4px 10px; font-size:11px; cursor:pointer; font-family:inherit;">🏠 主页</button>
             <button id="open-fee-calc-btn" style="background:#2a3f5e; color:#c6d4df; border:none; border-radius:4px; padding:4px 10px; font-size:11px; cursor:pointer; font-family:inherit;">🧮 计算价格</button>
         </div>
@@ -6735,11 +6853,10 @@ function bindEvents() {
         openChart({
             appid: caseItem.appid,
             market_hash_name: mhn,
-            name:
-                caseItem.name +
-                (caseItem.is_skin
-                    ? ' (' + getWearLabel(caseItem, wear) + ' · ' + getQualityLabel(caseItem, quality) + ')'
-                    : '')
+            name: caseItem.name,
+            item: caseItem, // ⭐ 传 item 对象
+            wear: wear, // ⭐ 传当前磨损
+            quality: quality // ⭐ 传当前品质
         });
     };
 
