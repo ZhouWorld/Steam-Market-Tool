@@ -25,7 +25,7 @@
 // @require      https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js
 // @resource     chartjs_css https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
 // @grant        GM_getResourceText
-// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/5271d74057736b8d4fe809f2309a344fa083413f/myConfig.json5
+// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/b63552e9574ce5db024be9c285fb484eab2c2d97/myConfig.json5
 // ==/UserScript==
 
 // ---------- orderbook 缓存 ----------
