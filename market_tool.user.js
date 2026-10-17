@@ -25,7 +25,7 @@
 // @require      https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js
 // @resource     chartjs_css https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
 // @grant        GM_getResourceText
-// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/645fb3bf362f44b8a6f804c6fc1af19ee56488ca/myConfig.json5
+// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/88066d814002023a81be325ac5b122b75f2e9d67/myConfig.json5
 // ==/UserScript==
 
 // ---------- orderbook 缓存 ----------
@@ -1015,7 +1015,7 @@ function getQualityLabel(item, quality) {
     if (!item.is_skin) return '';
     return QUALITY_LABELS[quality] || quality || '';
 }
-
+// ---------- 获取当前页面的武器箱 ----------
 // ---------- 从详情页读取当前磨损 ----------
 function readCurrentWearFromPage(item) {
     if (!item.is_skin) return null;
@@ -2930,6 +2930,31 @@ GM_addStyle(`
     background: #1b2838;
     color: #c6d4df;
 }
+
+.item-list-refresh-btn {
+    background: transparent;
+    color: #8b9aab;
+    border: 1px solid #2a3f5e;
+    border-radius: 4px;
+    padding: 3px 10px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+    line-height: 1.2;
+    margin-right: 6px;
+    flex-shrink: 0;
+}
+
+.item-list-refresh-btn:hover {
+    background: #2a3f5e;
+    color: #c6d4df;
+    border-color: #3a5a7a;
+}
+
+.item-list-refresh-btn:active {
+    transform: scale(0.92);
+}
 `);
 
 // ============================================================
@@ -3351,6 +3376,29 @@ function isCommodityItem(inventoryData, marketHashName) {
     return false;
 }
 
+function updateCheckAllState(overlay) {
+    var checkAllEl = overlay.querySelector('.item-list-check-all');
+    if (!checkAllEl) return;
+
+    var allChecks = overlay.querySelectorAll('.item-list-check');
+    var checkedCount = 0;
+    allChecks.forEach(function (cb) {
+        if (cb.checked) checkedCount++;
+    });
+
+    if (checkedCount === 0) {
+        checkAllEl.checked = false;
+        checkAllEl.indeterminate = false;
+    } else if (checkedCount === allChecks.length) {
+        checkAllEl.checked = true;
+        checkAllEl.indeterminate = false;
+    } else {
+        // ⭐ 部分选中：显示半勾选（横杠）
+        checkAllEl.checked = false;
+        checkAllEl.indeterminate = true;
+    }
+}
+
 // ============================================================
 // 通用物品列表弹窗
 // config = {
@@ -3373,6 +3421,7 @@ function showItemListDialog(config) {
     var pageSizes = config.pageSizes || [10, 50, 100];
     var pageSize = config.pageSize || 50;
     var rowActions = config.rowActions || null;
+    var onRefresh = config.onRefresh || null; // ⭐ 新增
 
     // 计算总列数
     var totalCols = columns.length;
@@ -3399,6 +3448,20 @@ function showItemListDialog(config) {
                     var style = '';
                     if (col.width) style += 'width:' + col.width + ';';
                     if (col.align) style += 'text-align:' + col.align + ';';
+
+                    // ⭐ 复选框列：表头显示全选复选框
+                    if (col.key === '__check__') {
+                        return (
+                            '<th style="' +
+                            style +
+                            '">' +
+                            '<input type="checkbox" class="item-list-check-all" ' +
+                            'title="全选/全不选当前页" ' +
+                            'style="cursor:pointer; width:14px; height:14px; accent-color:#66c0f4;">' +
+                            '</th>'
+                        );
+                    }
+
                     return '<th style="' + style + '">' + col.label + '</th>';
                 })
                 .join('') +
@@ -3557,13 +3620,17 @@ function showItemListDialog(config) {
             : '<div class="item-list-icon" style="width:32px; height:32px; margin-right:10px; flex-shrink:0; ' +
               'display:flex; align-items:center; justify-content:center; color:#4a5a6a; font-size:14px;">?</div>';
 
+        // ⭐ 刷新按钮（仅当 onRefresh 存在时显示）
+        var refreshBtnHtml = onRefresh ? '<button class="item-list-refresh-btn" title="刷新数据">🔄</button>' : '';
+
         overlay.innerHTML = `
-    <div class="item-list-dialog">
-        <div class="item-list-header">
+          <div class="item-list-dialog">
+          <div class="item-list-header">
             ${iconHtml}
             <span class="item-list-title">${title}</span>
             <div style="flex:1;"></div>
             ${batchToolbarHtml}
+            ${refreshBtnHtml}
             <button class="item-list-close" title="关闭">✕</button>
         </div>
         <div class="item-list-body">
@@ -3582,6 +3649,18 @@ function showItemListDialog(config) {
             ${paginationHtml}
         </div>
     </div>`;
+
+        // ⭐ 刷新按钮
+        var refreshBtn = overlay.querySelector('.item-list-refresh-btn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', function () {
+                // hideIconPreview();          // 清理图标预览
+                overlay.remove(); // 关闭当前弹窗
+                if (typeof onRefresh === 'function') {
+                    onRefresh(); // 调用回调重新打开
+                }
+            });
+        }
 
         // ⭐ 图标 hover 时切换到高清
         var iconEl = overlay.querySelector('.item-list-icon');
@@ -3649,6 +3728,22 @@ function showItemListDialog(config) {
             var batchCountEl = overlay.querySelector('.item-list-batch-count');
             var batchModifyBtn = overlay.querySelector('.item-list-batch-modify-btn');
             var batchRemoveBtn = overlay.querySelector('.item-list-batch-remove-btn');
+
+            // ⭐ 全选/全不选
+            var checkAllEl = overlay.querySelector('.item-list-check-all');
+            if (checkAllEl) {
+                checkAllEl.addEventListener('change', function () {
+                    var checked = this.checked;
+                    overlay.querySelectorAll('.item-list-check').forEach(function (cb) {
+                        cb.checked = checked;
+                    });
+                    updateBatchBtnState();
+                });
+
+                // ⭐ 初始化状态：根据当前行勾选情况更新表头复选框
+                // ⭐ 初始化状态：根据当前行勾选情况更新表头复选框
+                updateCheckAllState(overlay);
+            }
 
             if (batchCountEl && batchModifyBtn && batchRemoveBtn) {
                 // ⭐ 收集"勾选了 + 该行价格改了"的项
@@ -3729,11 +3824,19 @@ function showItemListDialog(config) {
                         batchRemoveBtn.style.cursor = 'not-allowed';
                         batchRemoveBtn.title = '请先勾选要撤销的物品';
                     }
+
+                    // ⭐ 同步全选框状态
+                    if (typeof updateCheckAllState === 'function') {
+                        updateCheckAllState(overlay);
+                    }
                 }
 
                 // 复选框变化
                 overlay.querySelectorAll('.item-list-check').forEach(function (cb) {
-                    cb.addEventListener('change', updateBatchBtnState);
+                    cb.addEventListener('change', function () {
+                        updateBatchBtnState();
+                        updateCheckAllState(overlay); // ⭐ 新增
+                    });
                 });
 
                 // 监听所有价格输入框的变化
@@ -4664,13 +4767,18 @@ async function showActiveListingsDialog(caseIndex) {
 
     showItemListDialog({
         title: displayName + ' - 出售中',
-        iconUrl: getItemIconUrl(item), // ⭐ 新增
-        iconUrlHighRes: getItemIconUrl(item, '256fx256f'), // ⭐ 高清
+        iconUrl: getItemIconUrl(item),
         columns: columns,
         items: itemListings,
         pageSize: 50,
         pageSizes: [10, 50, 100],
-        rowActions: rowActions
+        rowActions: rowActions,
+        onRefresh: function () {
+            // cachedListingsData = null;
+            // listingsCacheTime = 0;
+            // ⭐ 重新打开
+            showActiveListingsDialog(caseIndex);
+        }
     });
 }
 
@@ -8525,14 +8633,19 @@ async function showCooldownItemsDialog(caseIndex) {
     }
 
     showItemListDialog({
-        title: displayName + ' - 冷却中',
-        iconUrl: getItemIconUrl(item), // ⭐ 新增
-        iconUrlHighRes: getItemIconUrl(item, '256fx256f'), // ⭐ 高清
+        title: displayName + ' - 可交易（所有磨损/品质）',
+        iconUrl: getItemIconUrl(item),
         columns: columns,
         items: items,
         pageSize: 50,
         pageSizes: [10, 50, 100],
-        rowActions: null
+        rowActions: null,
+        onRefresh: function () {
+            // ⭐ 清库存缓存
+            // cachedInventoryData = null;
+            // inventoryCacheTime = 0;
+            showTradeableItemsDialog(caseIndex);
+        }
     });
 }
 
@@ -8699,14 +8812,19 @@ async function showTradeableItemsDialog(caseIndex) {
     };
 
     showItemListDialog({
-        title: displayName + ' - 可交易（所有磨损/品质）',
-        iconUrl: getItemIconUrl(item), // ⭐ 新增
-        iconUrlHighRes: getItemIconUrl(item, '256fx256f'), // ⭐ 高清
+        title: displayName + ' - 冷却中',
+        iconUrl: getItemIconUrl(item),
         columns: columns,
         items: items,
         pageSize: 50,
         pageSizes: [10, 50, 100],
-        rowActions: rowActions
+        rowActions: null,
+        onRefresh: function () {
+            // ⭐ 清库存缓存
+            // cachedInventoryData = null;
+            // inventoryCacheTime = 0;
+            showCooldownItemsDialog(caseIndex);
+        }
     });
 }
 
