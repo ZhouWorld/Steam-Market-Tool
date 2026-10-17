@@ -25,7 +25,7 @@
 // @require      https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js
 // @resource     chartjs_css https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
 // @grant        GM_getResourceText
-// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/da424ada53302d8eea599e373b79c9d10ec34db9/myConfig.json5
+// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/054aac31ce38af29db5d504ede33e6d921a2b64b/myConfig.json5
 // ==/UserScript==
 
 // ---------- orderbook 缓存 ----------
@@ -2932,28 +2932,27 @@ GM_addStyle(`
 }
 
 .item-list-refresh-btn {
-    background: transparent;
-    color: #8b9aab;
-    border: 1px solid #2a3f5e;
+    background: #2a3f5e;
+    color: #c6d4df;
+    border: none;
     border-radius: 4px;
-    padding: 3px 10px;
-    font-size: 13px;
+    padding: 4px 10px;
+    font-size: 11px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background 0.2s;
+    white-space: nowrap;
     font-family: inherit;
-    line-height: 1.2;
+    line-height: 1.4;
     margin-right: 6px;
     flex-shrink: 0;
 }
 
 .item-list-refresh-btn:hover {
-    background: #2a3f5e;
-    color: #c6d4df;
-    border-color: #3a5a7a;
+    background: #3a5a7a;
 }
 
 .item-list-refresh-btn:active {
-    transform: scale(0.92);
+    transform: scale(0.95);
 }
 `);
 
@@ -3621,7 +3620,7 @@ function showItemListDialog(config) {
               'display:flex; align-items:center; justify-content:center; color:#4a5a6a; font-size:14px;">?</div>';
 
         // ⭐ 刷新按钮（仅当 onRefresh 存在时显示）
-        var refreshBtnHtml = onRefresh ? '<button class="item-list-refresh-btn" title="刷新数据">🔄</button>' : '';
+        var refreshBtnHtml = onRefresh ? '<button class="item-list-refresh-btn" title="刷新数据">🔄 刷新</button>' : '';
 
         overlay.innerHTML = `
           <div class="item-list-dialog">
@@ -8633,18 +8632,16 @@ async function showCooldownItemsDialog(caseIndex) {
     }
 
     showItemListDialog({
-        title: displayName + ' - 可交易（所有磨损/品质）',
+        title: displayName + ' - 冷却中',
         iconUrl: getItemIconUrl(item),
+        iconUrlHighRes: getItemIconUrl(item, '256fx256f'),
         columns: columns,
         items: items,
         pageSize: 50,
         pageSizes: [10, 50, 100],
-        rowActions: null,
+        rowActions: null, // ✅ 冷却中不需要行内操作
         onRefresh: function () {
-            // ⭐ 清库存缓存
-            // cachedInventoryData = null;
-            // inventoryCacheTime = 0;
-            showTradeableItemsDialog(caseIndex);
+            showCooldownItemsDialog(caseIndex); // ✅ 刷新自己
         }
     });
 }
@@ -8812,18 +8809,16 @@ async function showTradeableItemsDialog(caseIndex) {
     };
 
     showItemListDialog({
-        title: displayName + ' - 冷却中',
+        title: displayName + ' - 可交易',
         iconUrl: getItemIconUrl(item),
+        iconUrlHighRes: getItemIconUrl(item, '256fx256f'),
         columns: columns,
         items: items,
         pageSize: 50,
         pageSizes: [10, 50, 100],
-        rowActions: null,
+        rowActions: rowActions, // ✅ 关键：传入 rowActions
         onRefresh: function () {
-            // ⭐ 清库存缓存
-            // cachedInventoryData = null;
-            // inventoryCacheTime = 0;
-            showCooldownItemsDialog(caseIndex);
+            showTradeableItemsDialog(caseIndex); // ✅ 刷新自己
         }
     });
 }
