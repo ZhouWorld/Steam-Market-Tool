@@ -25,7 +25,7 @@
 // @require      https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js
 // @resource     chartjs_css https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
 // @grant        GM_getResourceText
-// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/84d63a356c516eae82dd95864372f00dce2605ea/myConfig.json5
+// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/3bf8245d54c839053ea93068e74572a41d6ef5ce/myConfig.json5
 // ==/UserScript==
 
 // ---------- orderbook 缓存 ----------
@@ -1242,22 +1242,28 @@ GM_addStyle(`
     }
 
     .weapon-cases-header h3 {
-        margin: 0;
-        font-size: 14px;
-        color: #c6d4df;
-        font-weight: bold;
-        pointer-events: none;
-        white-space: nowrap;
-    }
+    margin: 0;
+    font-size: 14px;
+    color: #c6d4df;
+    font-weight: bold;
+    pointer-events: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 1 1 auto;
+    padding-right: 8px;
+}
 
     .weapon-cases-controls {
-        display: flex;
-        gap: 6px;
-        align-items: center;
-        pointer-events: auto;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-    }
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    pointer-events: auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    flex-shrink: 0;
+}
 
     .weapon-cases-controls button {
         background: #2a3f5e;
@@ -6192,7 +6198,7 @@ function createPanel() {
 
     panel.innerHTML = `
         <div class="weapon-cases-header">
-            <h3><span class="drag-handle">⠿</span> ${titleText}</h3>
+            <h3 title="${String(titleText).replace(/"/g, '&quot;')}"><span class="drag-handle">⠿</span> ${titleText}</h3>
             <div class="weapon-cases-controls">
                 <span class="status" id="case-status">加载中...</span>
                 <span class="page-size-label">每页</span>
