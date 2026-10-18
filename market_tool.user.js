@@ -8989,11 +8989,19 @@ async function showTradeableItemsDialog(caseIndex) {
                                min-width:60px;">⬆ 上架</button>`;
         },
         bind: function (rowEl, rowItem, api) {
-            var input = rowEl.querySelector('.item-list-price-input');
-            var btn = rowEl.querySelector('.item-list-sell-btn');
-            if (!input || !btn) return;
+            // ⭐ 用事件委托，避免 input 被重建后事件丢失
+            function getRowInput() {
+                return rowEl.querySelector('.item-list-price-input');
+            }
+            function getRowBtn() {
+                return rowEl.querySelector('.item-list-sell-btn');
+            }
 
             function updateBtnState() {
+                var input = getRowInput();
+                var btn = getRowBtn();
+                if (!input || !btn) return;
+
                 var val = parseFloat(input.value);
                 var valid = !isNaN(val) && val >= 0.01;
                 if (valid) {
@@ -9011,7 +9019,8 @@ async function showTradeableItemsDialog(caseIndex) {
                     btn.style.cursor = 'not-allowed';
                     btn.title = '请先填写售价';
                 }
-                // ⭐ 新增：更新"实收"文字
+
+                // ⭐ 更新"实收"文字
                 var sellerEl = rowEl.querySelector('.item-list-seller-text');
                 if (sellerEl) {
                     if (valid) {
@@ -9025,29 +9034,52 @@ async function showTradeableItemsDialog(caseIndex) {
                 }
             }
 
-            input.addEventListener('input', updateBtnState);
-            input.addEventListener('focus', function () {
-                this.select();
-            });
-            input.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter' && !btn.disabled) btn.click();
-                e.stopPropagation();
+            // ⭐ 事件委托：input / focus / keydown 全部绑在 rowEl 上
+            rowEl.addEventListener('input', function (e) {
+                if (e.target && e.target.classList.contains('item-list-price-input')) {
+                    updateBtnState();
+                }
             });
 
-            btn.addEventListener('click', function () {
-                if (this.disabled) return;
+            rowEl.addEventListener('focusin', function (e) {
+                if (e.target && e.target.classList.contains('item-list-price-input')) {
+                    e.target.select();
+                }
+            });
+
+            rowEl.addEventListener('keydown', function (e) {
+                if (e.target && e.target.classList.contains('item-list-price-input')) {
+                    if (e.key === 'Enter') {
+                        var btn = getRowBtn();
+                        if (btn && !btn.disabled) btn.click();
+                    }
+                    e.stopPropagation();
+                }
+            });
+
+            // ⭐ 按钮点击也走事件委托
+            rowEl.addEventListener('click', function (e) {
+                var btn = e.target.closest('.item-list-sell-btn');
+                if (!btn) return;
+                if (btn.disabled) return;
+
+                var input = getRowInput();
+                if (!input) return;
+
                 var buyerPrice = parseFloat(input.value);
                 if (isNaN(buyerPrice) || buyerPrice < 0.01) return;
 
                 var buyerPriceCents = Math.round(buyerPrice * 100);
                 var walletInfo = getWalletInfo();
-                var publisherFee = parseFloat(walletInfo.wallet_publisher_fee_default) || 0.1;
+                var publisherFee = parseFloat(walletInfo.wallet_publisher_fee_percent_default) || 0.1;
                 var feeInfo = calculateSteamFees(buyerPriceCents, walletInfo, publisherFee);
 
                 showFeeDetailDialog(feeInfo, displayName);
-                // ⭐ 用 rowItem.mhn
                 performSingleSell(item, inventoryData, feeInfo, rowItem.mhn, rowItem.assetid);
             });
+
+            // ⭐ 初始化一次，确保按钮初始状态正确
+            updateBtnState();
         },
 
         bind: function (rowEl, rowItem, api) {
