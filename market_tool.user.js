@@ -3533,8 +3533,6 @@ function showItemListDialog(config) {
     var batchModifyLabel = config.batchModifyLabel || '批量修改';
     var batchRemoveLabel = config.batchRemoveLabel || '批量撤销';
     var showBatchRemove = config.showBatchRemove !== false; // 默认 true
-    // ⭐ 是否可堆叠（可堆叠时不显示价格计算器按钮）
-    var isCommodity = config.isCommodity === true;
 
     // 计算总列数
     var totalCols = columns.length;
@@ -3752,22 +3750,20 @@ function showItemListDialog(config) {
         var refreshBtnHtml = onRefresh ? '<button class="item-list-refresh-btn" title="刷新数据">🔄 刷新</button>' : '';
 
         // ⭐ 价格计算器按钮（仅不可堆叠显示）
-        var feeCalcBtnHtml = '';
-        if (!isCommodity) {
-            feeCalcBtnHtml = `
-                <button class="item-list-fee-calc-btn" title="打开价格计算器">
-                    <svg width="14" height="14" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="2" y="1.5" width="12" height="13" rx="1.5" stroke="currentColor" stroke-width="1.2" fill="none"/>
-                        <rect x="4" y="3.5" width="8" height="2.5" rx="0.5" fill="currentColor"/>
-                        <circle cx="5" cy="8.5" r="0.8" fill="currentColor"/>
-                        <circle cx="8" cy="8.5" r="0.8" fill="currentColor"/>
-                        <circle cx="11" cy="8.5" r="0.8" fill="currentColor"/>
-                        <circle cx="5" cy="11.5" r="0.8" fill="currentColor"/>
-                        <circle cx="8" cy="11.5" r="0.8" fill="currentColor"/>
-                        <circle cx="11" cy="11.5" r="0.8" fill="currentColor"/>
-                    </svg>
-                </button>`;
-        }
+        // ⭐ 价格计算器按钮（全部物品通用）
+        var feeCalcBtnHtml = `
+            <button class="item-list-fee-calc-btn" title="打开价格计算器">
+                <svg width="14" height="14" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="2" y="1.5" width="12" height="13" rx="1.5" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                    <rect x="4" y="3.5" width="8" height="2.5" rx="0.5" fill="currentColor"/>
+                    <circle cx="5" cy="8.5" r="0.8" fill="currentColor"/>
+                    <circle cx="8" cy="8.5" r="0.8" fill="currentColor"/>
+                    <circle cx="11" cy="8.5" r="0.8" fill="currentColor"/>
+                    <circle cx="5" cy="11.5" r="0.8" fill="currentColor"/>
+                    <circle cx="8" cy="11.5" r="0.8" fill="currentColor"/>
+                    <circle cx="11" cy="11.5" r="0.8" fill="currentColor"/>
+                </svg>
+            </button>`;
 
         overlay.innerHTML = `
           <div class="item-list-dialog">
@@ -5003,7 +4999,6 @@ async function showActiveListingsDialog(caseIndex) {
         pageSize: 50,
         pageSizes: [10, 50, 100],
         rowActions: rowActions,
-        isCommodity: isCommodity, // ⭐ 新增
         onRefresh: function () {
             // ⭐ 清挂单缓存，强制重新请求 /mylistings
             cachedListingsData = null;
@@ -8876,7 +8871,6 @@ async function showCooldownItemsDialog(caseIndex) {
         pageSize: 50,
         pageSizes: [10, 50, 100],
         rowActions: null,
-        isCommodity: isCommodity, // ⭐ 新增
         onRefresh: function () {
             // ⭐ 清库存缓存，强制重新请求 context 16
             cachedInventoryData = null;
@@ -9081,7 +9075,6 @@ async function showTradeableItemsDialog(caseIndex) {
             // ⭐ 初始化一次，确保按钮初始状态正确
             updateBtnState();
         },
-
         // ⭐ 批量上架回调（复用 showItemListDialog 的批量工具条）
         onBatchModify: async function (selected, api) {
             // selected: [{ item, rowIdx, newPriceCents }, ...]
@@ -9192,7 +9185,6 @@ async function showTradeableItemsDialog(caseIndex) {
         rowActions: rowActions,
         batchModifyLabel: '批量上架',
         showBatchRemove: false,
-        isCommodity: isCommodity, // ⭐ 新增
         onRefresh: function () {
             cachedInventoryData = null;
             inventoryCacheTime = 0;
