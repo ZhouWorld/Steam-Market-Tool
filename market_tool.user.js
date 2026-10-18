@@ -2977,6 +2977,32 @@ GM_addStyle(`
     color: #c6d4df;
 }
 
+/* ===== 通用列表：价格计算器按钮 ===== */
+.item-list-fee-calc-btn {
+    background: #2a3f5e;
+    color: #c6d4df;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    transition: background 0.2s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    height: 24px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+.item-list-fee-calc-btn:hover {
+    background: #3a5a7a;
+}
+
+.item-list-fee-calc-btn:active {
+    transform: scale(0.95);
+}
+
 .item-list-refresh-btn {
     background: #2a3f5e;
     color: #c6d4df;
@@ -3507,6 +3533,8 @@ function showItemListDialog(config) {
     var batchModifyLabel = config.batchModifyLabel || '批量修改';
     var batchRemoveLabel = config.batchRemoveLabel || '批量撤销';
     var showBatchRemove = config.showBatchRemove !== false; // 默认 true
+    // ⭐ 是否可堆叠（可堆叠时不显示价格计算器按钮）
+    var isCommodity = config.isCommodity === true;
 
     // 计算总列数
     var totalCols = columns.length;
@@ -3723,6 +3751,24 @@ function showItemListDialog(config) {
         // ⭐ 刷新按钮（仅当 onRefresh 存在时显示）
         var refreshBtnHtml = onRefresh ? '<button class="item-list-refresh-btn" title="刷新数据">🔄 刷新</button>' : '';
 
+        // ⭐ 价格计算器按钮（仅不可堆叠显示）
+        var feeCalcBtnHtml = '';
+        if (!isCommodity) {
+            feeCalcBtnHtml = `
+                <button class="item-list-fee-calc-btn" title="打开价格计算器">
+                    <svg width="14" height="14" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="2" y="1.5" width="12" height="13" rx="1.5" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                        <rect x="4" y="3.5" width="8" height="2.5" rx="0.5" fill="currentColor"/>
+                        <circle cx="5" cy="8.5" r="0.8" fill="currentColor"/>
+                        <circle cx="8" cy="8.5" r="0.8" fill="currentColor"/>
+                        <circle cx="11" cy="8.5" r="0.8" fill="currentColor"/>
+                        <circle cx="5" cy="11.5" r="0.8" fill="currentColor"/>
+                        <circle cx="8" cy="11.5" r="0.8" fill="currentColor"/>
+                        <circle cx="11" cy="11.5" r="0.8" fill="currentColor"/>
+                    </svg>
+                </button>`;
+        }
+
         overlay.innerHTML = `
           <div class="item-list-dialog">
           <div class="item-list-header">
@@ -3739,14 +3785,17 @@ function showItemListDialog(config) {
                 <tbody>${tbodyHtml}</tbody>
             </table>
         </div>
-        <div class="item-list-footer">
+                <div class="item-list-footer">
             <div style="display:flex; align-items:center; gap:6px;">
                 <span style="font-size:11px; color:#8b9aab;">每页</span>
                 <select class="item-list-page-size">${pageSizeOptions}</select>
                 <span style="font-size:11px; color:#8b9aab;">条 (共 ${items.length} 个)</span>
             </div>
             <div style="flex:1;"></div>
-            ${paginationHtml}
+            <div style="display:flex; align-items:center; gap:8px;">
+                ${paginationHtml}
+                ${feeCalcBtnHtml}
+            </div>
         </div>
     </div>`;
 
@@ -3786,6 +3835,14 @@ function showItemListDialog(config) {
         if (closeBtn) {
             closeBtn.addEventListener('click', function () {
                 overlay.remove();
+            });
+        }
+
+        // ⭐ 价格计算器按钮
+        var feeCalcBtn = overlay.querySelector('.item-list-fee-calc-btn');
+        if (feeCalcBtn) {
+            feeCalcBtn.addEventListener('click', function () {
+                showFeeCalculator();
             });
         }
 
@@ -4946,6 +5003,7 @@ async function showActiveListingsDialog(caseIndex) {
         pageSize: 50,
         pageSizes: [10, 50, 100],
         rowActions: rowActions,
+        isCommodity: isCommodity, // ⭐ 新增
         onRefresh: function () {
             // ⭐ 清挂单缓存，强制重新请求 /mylistings
             cachedListingsData = null;
@@ -8818,6 +8876,7 @@ async function showCooldownItemsDialog(caseIndex) {
         pageSize: 50,
         pageSizes: [10, 50, 100],
         rowActions: null,
+        isCommodity: isCommodity, // ⭐ 新增
         onRefresh: function () {
             // ⭐ 清库存缓存，强制重新请求 context 16
             cachedInventoryData = null;
@@ -9095,7 +9154,7 @@ async function showTradeableItemsDialog(caseIndex) {
     };
 
     showItemListDialog({
-        title: displayName + ' - 可交易（所有磨损/品质）',
+        title: displayName + ' - 可交易',
         iconUrl: getItemIconUrl(item),
         iconUrlHighRes: getItemIconUrl(item, '256fx256f'),
         columns: columns,
@@ -9105,6 +9164,7 @@ async function showTradeableItemsDialog(caseIndex) {
         rowActions: rowActions,
         batchModifyLabel: '批量上架',
         showBatchRemove: false,
+        isCommodity: isCommodity, // ⭐ 新增
         onRefresh: function () {
             cachedInventoryData = null;
             inventoryCacheTime = 0;
