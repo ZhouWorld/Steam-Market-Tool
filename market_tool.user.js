@@ -25,7 +25,7 @@
 // @require      https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js
 // @resource     chartjs_css https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
 // @grant        GM_getResourceText
-// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/3bf8245d54c839053ea93068e74572a41d6ef5ce/myConfig.json5
+// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/f4295bde3ae78bc34e049db3541cc43e3e846f70/myConfig.json5
 // ==/UserScript==
 
 // ---------- orderbook 缓存 ----------
@@ -7771,12 +7771,7 @@ async function loadDataForCurrentCase() {
     if (!matched) {
         content.innerHTML = `
             <div class="no-case-match">
-                ⚠️ 当前页面不是支持的物品页面<br>
-                <span style="font-size:12px;color:#5a6a7a;margin-top:8px;display:block;">
-                    支持的物品: ${WEAPON_CASES.map(function (c) {
-                        return c.name;
-                    }).join('、')}
-                </span>
+                ⚠️ 当前页面不是支持的物品页面
             </div>
         `;
         if (status) status.textContent = '⚠️ 未匹配';
