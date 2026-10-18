@@ -9082,10 +9082,6 @@ async function showTradeableItemsDialog(caseIndex) {
             updateBtnState();
         },
 
-        bind: function (rowEl, rowItem, api) {
-            // ... 原有代码不变 ...
-        },
-
         // ⭐ 批量上架回调（复用 showItemListDialog 的批量工具条）
         onBatchModify: async function (selected, api) {
             // selected: [{ item, rowIdx, newPriceCents }, ...]
