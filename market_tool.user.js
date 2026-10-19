@@ -25,7 +25,7 @@
 // @require      https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js
 // @resource     chartjs_css https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
 // @grant        GM_getResourceText
-// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/a3c00faa9127f7a88c52264cc0441ee8fbbbcdb9/myConfig.json5
+// @resource     myConfig https://gist.githubusercontent.com/ZhouWorld/3845fc1ac1d95a529f0623202795968f/raw/cfb4311c0cd0c7efdfcbcbbf725bf100791beee5/myConfig.json5
 // ==/UserScript==
 
 // ---------- orderbook 缓存 ----------
@@ -2955,6 +2955,37 @@ GM_addStyle(`
     fill: #8ed0ff;
 }
 
+/* ===== 通用列表：挂单按钮（S 图标） ===== */
+.item-list-sell-col-btn {
+    background: transparent;
+    border: 1px solid #2a3f5e;
+    border-radius: 4px;
+    padding: 3px 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    vertical-align: middle;
+}
+
+.item-list-sell-col-btn:hover {
+    background: rgba(139, 195, 74, 0.12);
+    border-color: #8bc34a;
+}
+
+.item-list-sell-col-btn:active {
+    transform: scale(0.92);
+}
+
+.item-list-sell-col-btn svg text {
+    transition: fill 0.2s;
+}
+
+.item-list-sell-col-btn:hover svg text {
+    fill: #a5d16c;
+}
 /* ===== 可点击徽章：两种视觉风格 ===== */
 .inv-count-badge.tradable.clickable {
     cursor: pointer;
@@ -3651,6 +3682,9 @@ function showItemListDialog(config) {
     var batchRemoveLabel = config.batchRemoveLabel || '批量撤销';
     var showBatchRemove = config.showBatchRemove !== false; // 默认 true
 
+    // ⭐ 挂单按钮回调
+    var onSellClick = config.onSellClick || null;
+
     // 计算总列数
     var totalCols = columns.length;
 
@@ -3767,6 +3801,15 @@ function showItemListDialog(config) {
                             '<svg width="16" height="12" viewBox="0 0 16 12" xmlns="http://www.w3.org/2000/svg">' +
                             '<polyline points="1.5,10 5,6 8.5,8 12,3 15,5" fill="none" stroke="#66c0f4" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>' +
                             '<circle cx="15" cy="5" r="1.5" fill="#66c0f4"/>' +
+                            '</svg></button>';
+                    } else if (col.key === '__sell__') {
+                        // ⭐ 挂单按钮（S 图标）
+                        cellContent =
+                            '<button class="item-list-sell-col-btn" data-row-idx="' +
+                            (start + i) +
+                            '" title="查看挂单">' +
+                            '<svg width="12" height="14" viewBox="0 0 12 14" xmlns="http://www.w3.org/2000/svg">' +
+                            '<text x="6" y="11" text-anchor="middle" font-size="12" font-weight="700" fill="#8bc34a" font-family="Motiva Sans, Arial, sans-serif">S</text>' +
                             '</svg></button>';
                     } else {
                         // 自定义数据列
@@ -4011,7 +4054,6 @@ function showItemListDialog(config) {
                 });
 
                 // ⭐ 初始化状态：根据当前行勾选情况更新表头复选框
-                // ⭐ 初始化状态：根据当前行勾选情况更新表头复选框
                 updateCheckAllState(overlay);
             }
 
@@ -4151,7 +4193,6 @@ function showItemListDialog(config) {
                         }
                     });
                 }
-
                 // 初始化
                 updateBatchBtnState();
             }
@@ -4160,6 +4201,34 @@ function showItemListDialog(config) {
 
     render();
     document.body.appendChild(overlay);
+
+    // ⭐ 挂单按钮事件委托
+    overlay.addEventListener('click', function (e) {
+        console.log('[overlay click] target=', e.target); // ⭐ 每次 overlay 内点击都打印
+
+        var btn = e.target.closest('.item-list-sell-col-btn');
+        if (!btn) return;
+        e.stopPropagation();
+
+        var rowIdx = parseInt(btn.dataset.rowIdx);
+        var it = items[rowIdx];
+        console.log('[挂单按钮] rowIdx=', rowIdx, 'item=', it); // ⭐ 日志
+        if (!it) {
+            console.warn('[挂单按钮] items[rowIdx] 为空');
+            return;
+        }
+
+        if (typeof onSellClick === 'function') {
+            console.log('[挂单按钮] 调用 onSellClick'); // ⭐ 日志
+            onSellClick(it, {
+                close: function () {
+                    overlay.remove();
+                }
+            });
+        } else {
+            console.warn('[挂单按钮] onSellClick 未传入'); // ⭐ 日志
+        }
+    });
 
     // ⭐ 走势图按钮事件委托
     overlay.addEventListener('click', function (e) {
@@ -4739,10 +4808,12 @@ async function showActiveListingsDialog(caseIndex) {
 
     var columns;
     if (isCommodity) {
-        // ⭐ 可堆叠：复选框 / 挂单ID / 上架时间 / 出售价格 / 操作
+        // ⭐ 可堆叠：复选框 / 挂单ID / 挂单 / 走势 / 上架时间 / 出售价格 / 操作
         columns = [
             { key: '__check__', label: '☑', width: '36px', align: 'center' },
             { key: 'listingid', label: '挂单ID', align: 'left' },
+            { key: '__sell__', label: '挂单', width: '52px', align: 'center' },
+            { key: '__chart__', label: '走势', width: '52px', align: 'center' }, // ⭐ 新增
             { key: 'listedAt', label: '上架时间', width: '140px', align: 'center' },
             { key: '__price__', label: '出售价格 (' + symbol + ')', width: '120px', align: 'center' },
             { key: '__action__', label: '操作', width: '140px', align: 'center' }
@@ -4754,6 +4825,7 @@ async function showActiveListingsDialog(caseIndex) {
             { key: 'listingid', label: '挂单ID', align: 'left' },
             { key: 'wear', label: '磨损度', width: '100px', align: 'center' },
             { key: '__chart__', label: '走势', width: '52px', align: 'center' }, // ⭐ 新增
+            { key: '__sell__', label: '挂单', width: '52px', align: 'center' }, // ⭐ 新增
             { key: 'listedAt', label: '上架时间', width: '140px', align: 'center' },
             { key: '__price__', label: '出售价格 (' + symbol + ')', width: '120px', align: 'center' },
             { key: '__action__', label: '操作', width: '140px', align: 'center' }
@@ -5128,6 +5200,13 @@ async function showActiveListingsDialog(caseIndex) {
         pageSize: 50,
         pageSizes: [10, 50, 100],
         rowActions: rowActions,
+        onSellClick: function (rowItem) {
+            var mhn = rowItem.mhn || rowItem.market_hash_name;
+            var titleParts = [item.name];
+            if (rowItem.wear && rowItem.wear !== '--') titleParts.push(rowItem.wear);
+            titleParts.push('挂单表');
+            showOrderBookDialog(mhn, titleParts.join(' · '));
+        },
         onRefresh: function () {
             // ⭐ 清挂单缓存，强制重新请求 /mylistings
             cachedListingsData = null;
@@ -5136,6 +5215,127 @@ async function showActiveListingsDialog(caseIndex) {
             cachedInventoryData = null;
             inventoryCacheTime = 0;
             showActiveListingsDialog(caseIndex);
+        }
+    });
+}
+
+// ============================================================
+// ⭐ 弹出某个 mhn 的挂单表（复用 showItemListDialog）
+// mhn: market_hash_name
+// title: 弹窗标题
+// ============================================================
+async function showOrderBookDialog(mhn, title) {
+    console.log('[showOrderBookDialog] 开始 mhn=', mhn, 'title=', title); // ⭐ 日志
+
+    if (!mhn) {
+        showChartMessage('⚠️ 无法确定市场名称', 'warning');
+        return;
+    }
+
+    showChartMessage('⏳ 正在获取挂单数据...', 'warning');
+
+    var appid = 730;
+    var data;
+    try {
+        data = await fetchOrderBook(appid, mhn);
+        console.log('[showOrderBookDialog] 接口返回:', data); // ⭐ 日志
+    } catch (e) {
+        showChartMessage('❌ 获取挂单失败: ' + e.message, 'error');
+        return;
+    }
+
+    var result = parseOrderBook(data);
+    console.log('[showOrderBookDialog] 解析结果 sellCount=', result.sellCount, 'orders=', result.sellOrders.length);
+
+    if (!result.sellOrders || result.sellOrders.length === 0) {
+        showChartMessage('⚠️ ' + (title || mhn) + ' 暂无挂单', 'warning');
+        return;
+    }
+
+    // 构造分页数据（每页 50 条）
+    var pageSize = 50;
+    var items = [];
+
+    var lowerCumulativeMap = {};
+    var cumulativeQty = 0;
+    for (var i = 0; i < result.sellOrders.length; i++) {
+        var price = result.sellOrders[i][0];
+        var qty = result.sellOrders[i][1];
+        lowerCumulativeMap[price] = cumulativeQty;
+        cumulativeQty += qty;
+    }
+
+    for (var j = 0; j < result.sellOrders.length; j++) {
+        var p = result.sellOrders[j][0];
+        var q = result.sellOrders[j][1];
+        items.push({
+            price: p,
+            lowerQty: lowerCumulativeMap[p] || 0,
+            qty: q,
+            priceText: formatPrice(p),
+            lowerQtyText: formatQty(lowerCumulativeMap[p] || 0),
+            qtyText: formatQty(q)
+        });
+    }
+
+    var symbol = getCurrencySymbol();
+
+    console.log('[showOrderBookDialog] 准备弹窗，items 数量=', items.length);
+
+    // ⭐ 反查 item，拿缩略图
+    var iconItem = null;
+    var found = findCaseAndWearByMhn(mhn);
+    if (found) {
+        iconItem = found.item;
+    } else {
+        // 兜底：遍历配置找 mhn 匹配
+        for (var ci = 0; ci < WEAPON_CASES.length; ci++) {
+            var c = WEAPON_CASES[ci];
+            if (c.is_graffiti) {
+                if (mhn.indexOf(c.base_name + ' (') === 0 || mhn === c.base_name) {
+                    iconItem = c;
+                    break;
+                }
+            } else if (c.is_skin) {
+                var basePart = mhn.replace(/\s*\([^)]+\)\s*$/, '');
+                var prefixes = Object.values(QUALITY_PREFIX).filter(function (p) {
+                    return p;
+                });
+                for (var pi = 0; pi < prefixes.length; pi++) {
+                    if (basePart.indexOf(prefixes[pi]) === 0) {
+                        basePart = basePart.slice(prefixes[pi].length);
+                        break;
+                    }
+                }
+                if (basePart === c.base_name) {
+                    iconItem = c;
+                    break;
+                }
+            } else if (mhn === c.market_hash_name) {
+                iconItem = c;
+                break;
+            }
+        }
+    }
+
+    var iconUrl = iconItem ? getItemIconUrl(iconItem) : '';
+    var iconUrlHighRes = iconItem ? getItemIconUrl(iconItem, '256fx256f') : '';
+
+    showItemListDialog({
+        title: title || mhn,
+        iconUrl: iconUrl,
+        iconUrlHighRes: iconUrlHighRes,
+        columns: [
+            { key: 'priceText', label: '价格 (' + symbol + ')', align: 'left' },
+            { key: 'lowerQtyText', label: '低位挂单量', width: '120px', align: 'right' },
+            { key: 'qtyText', label: '数量', width: '100px', align: 'right' }
+        ],
+        items: items,
+        pageSize: pageSize,
+        pageSizes: [25, 50, 100, 200],
+        rowActions: null,
+        onRefresh: function () {
+            showOrderBookDialog(mhn, title);
         }
     });
 }
@@ -6620,10 +6820,25 @@ function createPanel() {
             </div>
         </div>
 
-                <!-- 底部按钮区 -->
+                        <!-- 底部按钮区 -->
         <div style="display:flex; align-items:center; gap:6px; padding:6px 0 2px 0; border-top:1px solid #1a2634; margin-top:0px;flex-shrink:0;">
             <button id="goto-market-home-btn" style="background:#2a3f5e; color:#c6d4df; border:none; border-radius:4px; padding:4px 10px; font-size:11px; cursor:pointer; font-family:inherit;">🏠 主页</button>
-            <button id="open-fee-calc-btn" style="background:#2a3f5e; color:#c6d4df; border:none; border-radius:4px; padding:4px 10px; font-size:11px; cursor:pointer; font-family:inherit;">🧮 计算价格</button>
+            <button id="open-fee-calc-btn" title="打开价格计算器"
+                onmouseover="this.style.background='#3a5a7a'"
+                onmouseout="this.style.background='#2a3f5e'"
+                style="background:#2a3f5e; color:#c6d4df; border:none; border-radius:4px; padding:4px 8px; cursor:pointer; display:inline-flex;
+                       align-items:center; justify-content:center; line-height:1; height:24px; box-sizing:border-box; transition:background 0.2s;">
+                <svg width="14" height="14" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="2" y="1.5" width="12" height="13" rx="1.5" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                    <rect x="4" y="3.5" width="8" height="2.5" rx="0.5" fill="currentColor"/>
+                    <circle cx="5" cy="8.5" r="0.8" fill="currentColor"/>
+                    <circle cx="8" cy="8.5" r="0.8" fill="currentColor"/>
+                    <circle cx="11" cy="8.5" r="0.8" fill="currentColor"/>
+                    <circle cx="5" cy="11.5" r="0.8" fill="currentColor"/>
+                    <circle cx="8" cy="11.5" r="0.8" fill="currentColor"/>
+                    <circle cx="11" cy="11.5" r="0.8" fill="currentColor"/>
+                </svg>
+            </button>
         </div>
     `;
 
@@ -8998,6 +9213,11 @@ async function showCooldownItemsDialog(caseIndex) {
         }
 
         var mhn = desc.market_hash_name;
+        if (!mhn) {
+            console.warn('[冷却中] desc 无 market_hash_name:', desc);
+            return; // ⭐ 跳过，不加入 rawAssets
+        }
+
         if (!mhn) return;
 
         // ⭐ 从 mhn 解析磨损度（中文/英文）
@@ -9083,7 +9303,9 @@ async function showCooldownItemsDialog(caseIndex) {
                 assetidDisplay: g.firstAssetId + ' 等 ' + g.count + ' 个',
                 cooldown: g.cooldown,
                 acquiredAt: g.acquiredAt, // ⭐ 新增
-                count: g.count
+                count: g.count,
+                mhn: g.mhn, // ⭐ 补上
+                caseIndex: caseIndex // ⭐ 补上（走势图用）
             });
         });
     } else {
@@ -9108,7 +9330,9 @@ async function showCooldownItemsDialog(caseIndex) {
     if (isCommodity) {
         columns = [
             { key: 'assetidDisplay', label: '物品ID', align: 'left' },
-            { key: 'acquiredAt', label: '入库时间', width: '150px', align: 'center' }, // ⭐ 新增
+            { key: '__sell__', label: '挂单', width: '52px', align: 'center' },
+            { key: '__chart__', label: '走势', width: '52px', align: 'center' }, // ⭐ 新增
+            { key: 'acquiredAt', label: '入库时间', width: '150px', align: 'center' },
             { key: 'cooldown', label: '剩余冷却时间', width: '160px', align: 'center' },
             { key: 'count', label: '数量', width: '80px', align: 'center' }
         ];
@@ -9117,6 +9341,7 @@ async function showCooldownItemsDialog(caseIndex) {
             { key: '__assetid__', label: '物品ID', align: 'left' },
             { key: 'wear', label: '磨损度', width: '100px', align: 'center' },
             { key: '__chart__', label: '走势', width: '52px', align: 'center' }, // ⭐ 新增
+            { key: '__sell__', label: '挂单', width: '52px', align: 'center' }, // ⭐ 新增
             { key: 'acquiredAt', label: '入库时间', width: '150px', align: 'center' }, // ⭐ 新增
             { key: 'cooldown', label: '剩余冷却时间', width: '160px', align: 'center' }
         ];
@@ -9131,8 +9356,15 @@ async function showCooldownItemsDialog(caseIndex) {
         pageSize: 50,
         pageSizes: [10, 50, 100],
         rowActions: null,
+        onSellClick: function (rowItem) {
+            var mhn = rowItem.mhn;
+            console.log('[冷却中-挂单] mhn=', mhn); // ⭐ 日志
+            var titleParts = [item.name];
+            if (rowItem.wear && rowItem.wear !== '--') titleParts.push(rowItem.wear);
+            titleParts.push('挂单表');
+            showOrderBookDialog(mhn, titleParts.join(' · '));
+        },
         onRefresh: function () {
-            // ⭐ 清库存缓存，强制重新请求 context 16
             cachedInventoryData = null;
             inventoryCacheTime = 0;
             showCooldownItemsDialog(caseIndex);
@@ -9203,10 +9435,12 @@ async function showTradeableItemsDialog(caseIndex) {
     var columns;
     if (isCommodity) {
         columns = [
-            { key: '__check__', label: '☑', width: '36px', align: 'center' },
-            { key: '__index__', label: '序号', width: '60px', align: 'center' },
-            { key: '__price__', label: '售价 (' + symbol + ')', width: '120px', align: 'center' },
-            { key: '__action__', label: '操作', width: '100px', align: 'center' }
+            { key: 'assetidDisplay', label: '物品ID', align: 'left' },
+            { key: '__sell__', label: '挂单', width: '52px', align: 'center' },
+            { key: '__chart__', label: '走势', width: '52px', align: 'center' }, // ⭐ 新增
+            { key: 'acquiredAt', label: '入库时间', width: '150px', align: 'center' },
+            { key: 'cooldown', label: '剩余冷却时间', width: '160px', align: 'center' },
+            { key: 'count', label: '数量', width: '80px', align: 'center' }
         ];
     } else {
         columns = [
@@ -9214,6 +9448,7 @@ async function showTradeableItemsDialog(caseIndex) {
             { key: '__assetid__', label: '物品ID', align: 'left' },
             { key: 'wear', label: '磨损度', width: '100px', align: 'center' },
             { key: '__chart__', label: '走势', width: '52px', align: 'center' }, // ⭐ 新增
+            { key: '__sell__', label: '挂单', width: '52px', align: 'center' }, // ⭐ 新增
             { key: '__price__', label: '出售价格 (' + symbol + ')', width: '120px', align: 'center' },
             { key: '__action__', label: '操作', width: '140px', align: 'center' }
         ];
@@ -9447,6 +9682,13 @@ async function showTradeableItemsDialog(caseIndex) {
         rowActions: rowActions,
         batchModifyLabel: '批量上架',
         showBatchRemove: false,
+        onSellClick: function (rowItem) {
+            var mhn = rowItem.mhn;
+            var titleParts = [item.name];
+            if (rowItem.wear && rowItem.wear !== '--') titleParts.push(rowItem.wear);
+            titleParts.push('挂单表');
+            showOrderBookDialog(mhn, titleParts.join(' · '));
+        },
         onRefresh: function () {
             cachedInventoryData = null;
             inventoryCacheTime = 0;
