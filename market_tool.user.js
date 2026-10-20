@@ -18,9 +18,11 @@
 // @grant        GM_addValueChangeListener
 // @grant        GM_openInTab
 // @grant        unsafeWindow
+// @grant        GM_xmlhttpRequest
 // @icon         https://store.steampowered.com/favicon.ico
 // @connect      steamcommunity.com
 // @connect      cdnjs.cloudflare.com
+// @connect      steam-inventory-worker.mysteam-inv-2026.workers.dev
 // @require      https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
 // @require      https://cdn.jsdelivr.net/npm/json5@2.2.3/dist/index.min.js
 // @resource     chartjs_css https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js
@@ -1255,6 +1257,77 @@ function getMultisellItems() {
     }
 
     return items;
+}
+
+// ============================================================
+// ⭐ 库存管理 API（Cloudflare Worker）
+// ============================================================
+const FLOAT_API_BASE = 'https://steam-inventory-worker.mysteam-inv-2026.workers.dev';
+const FLOAT_API_BATCH = 100; // 与 Worker 端单次上限对齐
+const FLOAT_API_CACHE_DURATION = 5 * 60 * 1000;
+
+let floatApiCache = {}; // assetid -> { float, source }
+let floatApiCacheTime = 0;
+
+// 批量查浮点
+async function queryFloatsBatch(assetids) {
+    const ids = (assetids || []).filter(Boolean).map(String);
+    if (ids.length === 0) return {};
+
+    const result = {};
+    const missing = [];
+    const now = Date.now();
+    const cacheValid = now - floatApiCacheTime < FLOAT_API_CACHE_DURATION;
+
+    for (const id of ids) {
+        if (cacheValid && floatApiCache[id]) {
+            result[id] = floatApiCache[id].float;
+        } else {
+            missing.push(id);
+        }
+    }
+
+    for (let i = 0; i < missing.length; i += FLOAT_API_BATCH) {
+        const batch = missing.slice(i, i + FLOAT_API_BATCH);
+        try {
+            // ⬇️ 改成 gmFetch，直接返回 JSON
+            const data = await gmFetch(`${FLOAT_API_BASE}/api/floats`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assetids: batch })
+            });
+            // ⬆️ 不再需要 resp.ok 和 resp.json()
+
+            const floats = data.floats || {};
+            for (const [id, info] of Object.entries(floats)) {
+                floatApiCache[id] = info;
+                result[id] = info.float;
+            }
+            for (const id of batch) {
+                if (!(id in result)) result[id] = null;
+            }
+        } catch (e) {
+            console.warn('[float-api] 批量查询失败:', e.message);
+            for (const id of batch) result[id] = null;
+        }
+    }
+    floatApiCacheTime = Date.now();
+    return result;
+}
+
+// 查统计
+async function queryStats() {
+    return await gmFetch(`${FLOAT_API_BASE}/api/stats`);
+}
+
+// 分页查库存
+async function queryInventory(page, pageSize, sortBy) {
+    const params = new URLSearchParams({
+        page: String(page || 1),
+        pageSize: String(pageSize || 50),
+        sortBy: sortBy || 'assetid'
+    });
+    return await gmFetch(`${FLOAT_API_BASE}/api/inventory?${params}`);
 }
 
 // ---------- 注入样式 ----------
@@ -3393,6 +3466,41 @@ function fetchMyListings(start, count) {
                 reject(new Error('请求超时'));
             },
             timeout: 20000
+        });
+    });
+}
+
+/**
+ * 使用 GM_xmlhttpRequest 绕过 CSP 和 CORS 限制
+ * @param {string} url - 请求地址
+ * @param {object} options - 请求配置 (method, headers, body)
+ * @returns {Promise<object>} - 解析后的 JSON 数据
+ */
+function gmFetch(url, options = {}) {
+    return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: options.method || 'GET',
+            url: url,
+            headers: options.headers || {},
+            data: options.body,
+            onload: function (response) {
+                if (response.status >= 200 && response.status < 300) {
+                    try {
+                        resolve(JSON.parse(response.responseText));
+                    } catch (e) {
+                        reject(new Error('JSON parse error: ' + e.message));
+                    }
+                } else {
+                    reject(new Error(`HTTP ${response.status}: ${response.statusText}`));
+                }
+            },
+            onerror: function (error) {
+                reject(new Error('GM_xmlhttpRequest error: ' + JSON.stringify(error)));
+            },
+            ontimeout: function () {
+                reject(new Error('GM_xmlhttpRequest timeout'));
+            },
+            timeout: 30000 // 30秒超时
         });
     });
 }
@@ -6839,6 +6947,10 @@ function createPanel() {
                     <circle cx="11" cy="11.5" r="0.8" fill="currentColor"/>
                 </svg>
             </button>
+            <button id="open-inv-overview-btn" style="background:#2a3f5e; color:#c6d4df; border:none;
+                border-radius:4px; padding:4px 10px; font-size:11px; cursor:pointer;
+                font-family:inherit;">📊 库存总览
+            </button>
         </div>
     `;
 
@@ -6898,6 +7010,13 @@ function createPanel() {
     if (feeCalcBtn) {
         feeCalcBtn.addEventListener('click', function () {
             showFeeCalculator();
+        });
+    }
+
+    var invOverviewBtn = document.getElementById('open-inv-overview-btn');
+    if (invOverviewBtn) {
+        invOverviewBtn.addEventListener('click', function () {
+            showInventoryOverviewDialog();
         });
     }
 
@@ -9197,28 +9316,24 @@ async function showCooldownItemsDialog(caseIndex) {
         descMap[d.classid + '_' + (d.instanceid || '0')] = d;
     });
 
-    // ⭐ 第一步：收集所有属于该 item 的原始 asset（不受 wears/qualities 配置限制）
+    // ⭐ 第一步：收集所有属于该 item 的原始 asset
     var rawAssets = [];
     (prot.assets || []).forEach(function (asset) {
         var key = asset.classid + '_' + (asset.instanceid || '0');
         var desc = descMap[key];
         if (!desc) return;
 
-        // ⭐ 用 isDescriptionOfItem 判断（兼容所有档位，不依赖配置）
         if (!isDescriptionOfItem(desc, item)) return;
 
-        // ⭐ 走统一判断（含过期校验）
         if (!isTradableProtected(desc)) {
-            return; // 不是冷却中（可能是挂售中、交易中、或已冷却结束）
+            return;
         }
 
         var mhn = desc.market_hash_name;
         if (!mhn) {
             console.warn('[冷却中] desc 无 market_hash_name:', desc);
-            return; // ⭐ 跳过，不加入 rawAssets
+            return;
         }
-
-        if (!mhn) return;
 
         // ⭐ 从 mhn 解析磨损度（中文/英文）
         var wearInfo = parseWearFromHashName(mhn, item);
@@ -9229,22 +9344,9 @@ async function showCooldownItemsDialog(caseIndex) {
         var cooldownText;
         var cooldownDeadline;
         if (deadline) {
-            console.log(
-                '[冷却中] 成功解析 deadline:',
-                deadline,
-                '| assetid:',
-                asset.assetid,
-                '| mhn:',
-                desc.market_hash_name
-            );
             cooldownText = formatRemainingTime(deadline);
             cooldownDeadline = deadline.getTime();
         } else {
-            // 兜底
-            console.log('[冷却中] deadline 为空！assetid:', asset.assetid, '| mhn:', desc.market_hash_name);
-            console.log('[冷却中] desc.owner_descriptions:', JSON.stringify(desc.owner_descriptions, null, 2));
-            console.log('[冷却中] desc.owner_descriptions 类型:', typeof desc.owner_descriptions);
-            console.log('[冷却中] 是否数组:', Array.isArray(desc.owner_descriptions));
             var cooldownDays = parseInt(desc.market_tradable_restriction, 10) || 0;
             cooldownText = cooldownDays > 0 ? '冷却期 ' + cooldownDays + ' 天' : '--';
             cooldownDeadline = 0;
@@ -9253,13 +9355,13 @@ async function showCooldownItemsDialog(caseIndex) {
         // ⭐ 用「截止时间 - 冷却期总长」倒推入库时间
         var restrictionDays = parseInt(desc.market_tradable_restriction, 10) || 0;
         var acquiredDate = calcAcquiredTime(deadline, restrictionDays);
-        var acquiredAt = formatAcquiredTime(acquiredDate); // "2026/10/13 11:00" 或 "--"
+        var acquiredAt = formatAcquiredTime(acquiredDate);
 
         rawAssets.push({
             assetid: asset.assetid,
             amount: parseInt(asset.amount, 10) || 1,
             wear: wearZh,
-            wearEn: wearInfo.en, // ⭐ 新增：英文磨损度
+            wearEn: wearInfo.en,
             cooldown: cooldownText,
             cooldownDeadline: cooldownDeadline,
             acquiredAt: acquiredAt,
@@ -9284,7 +9386,7 @@ async function showCooldownItemsDialog(caseIndex) {
                     cooldownDeadline: a.cooldownDeadline,
                     wear: a.wear,
                     cooldown: a.cooldown,
-                    acquiredAt: a.acquiredAt, // ⭐ 新增
+                    acquiredAt: a.acquiredAt,
                     count: 0,
                     firstAssetId: a.assetid,
                     mhn: a.mhn
@@ -9302,10 +9404,10 @@ async function showCooldownItemsDialog(caseIndex) {
                 assetid: g.firstAssetId,
                 assetidDisplay: g.firstAssetId + ' 等 ' + g.count + ' 个',
                 cooldown: g.cooldown,
-                acquiredAt: g.acquiredAt, // ⭐ 新增
+                acquiredAt: g.acquiredAt,
                 count: g.count,
-                mhn: g.mhn, // ⭐ 补上
-                caseIndex: caseIndex // ⭐ 补上（走势图用）
+                mhn: g.mhn,
+                caseIndex: caseIndex
             });
         });
     } else {
@@ -9314,11 +9416,11 @@ async function showCooldownItemsDialog(caseIndex) {
             items.push({
                 assetid: a.assetid,
                 wear: a.wear,
-                wearEn: a.wearEn, // ⭐ 新增
+                wearEn: a.wearEn,
                 cooldown: a.cooldown,
                 acquiredAt: a.acquiredAt,
-                mhn: a.mhn, // ⭐ 确保有
-                caseIndex: caseIndex // ⭐ 新增：直接定位用
+                mhn: a.mhn,
+                caseIndex: caseIndex
             });
         });
     }
@@ -9331,7 +9433,7 @@ async function showCooldownItemsDialog(caseIndex) {
         columns = [
             { key: 'assetidDisplay', label: '物品ID', align: 'left' },
             { key: '__sell__', label: '挂单', width: '52px', align: 'center' },
-            { key: '__chart__', label: '走势', width: '52px', align: 'center' }, // ⭐ 新增
+            { key: '__chart__', label: '走势', width: '52px', align: 'center' },
             { key: 'acquiredAt', label: '入库时间', width: '150px', align: 'center' },
             { key: 'cooldown', label: '剩余冷却时间', width: '160px', align: 'center' },
             { key: 'count', label: '数量', width: '80px', align: 'center' }
@@ -9340,9 +9442,9 @@ async function showCooldownItemsDialog(caseIndex) {
         columns = [
             { key: '__assetid__', label: '物品ID', align: 'left' },
             { key: 'wear', label: '磨损度', width: '100px', align: 'center' },
-            { key: '__chart__', label: '走势', width: '52px', align: 'center' }, // ⭐ 新增
-            { key: '__sell__', label: '挂单', width: '52px', align: 'center' }, // ⭐ 新增
-            { key: 'acquiredAt', label: '入库时间', width: '150px', align: 'center' }, // ⭐ 新增
+            { key: '__chart__', label: '走势', width: '52px', align: 'center' },
+            { key: '__sell__', label: '挂单', width: '52px', align: 'center' },
+            { key: 'acquiredAt', label: '入库时间', width: '150px', align: 'center' },
             { key: 'cooldown', label: '剩余冷却时间', width: '160px', align: 'center' }
         ];
     }
@@ -9358,10 +9460,9 @@ async function showCooldownItemsDialog(caseIndex) {
         rowActions: null,
         onSellClick: function (rowItem) {
             var mhn = rowItem.mhn;
-            console.log('[冷却中-挂单] mhn=', mhn); // ⭐ 日志
             var titleParts = [item.name];
             if (rowItem.wear && rowItem.wear !== '--') titleParts.push(rowItem.wear);
-            titleParts.push('挂单表');
+            titleParts.push('挂单');
             showOrderBookDialog(mhn, titleParts.join(' · '));
         },
         onRefresh: function () {
@@ -9414,10 +9515,10 @@ async function showTradeableItemsDialog(caseIndex) {
                 seenAssetIds.add(aid);
                 items.push({
                     assetid: aid,
-                    wear: wearZh, // ⭐ 该条 asset 的磨损（不可堆叠时用）
-                    mhn: mhn, // ⭐ 该条 asset 对应的 market_hash_name
-                    caseIndex: caseIndex, // ⭐ 新增
-                    amount: (count.amountMap && count.amountMap[aid]) || 1, // ⭐ 新增
+                    wear: wearZh,
+                    mhn: mhn,
+                    caseIndex: caseIndex,
+                    amount: (count.amountMap && count.amountMap[aid]) || 1,
                     cooldown: ''
                 });
             });
@@ -9435,20 +9536,20 @@ async function showTradeableItemsDialog(caseIndex) {
     var columns;
     if (isCommodity) {
         columns = [
-            { key: 'assetidDisplay', label: '物品ID', align: 'left' },
+            { key: '__check__', label: '☑', width: '36px', align: 'center' },
+            { key: '__index__', label: '序号', width: '60px', align: 'center' },
             { key: '__sell__', label: '挂单', width: '52px', align: 'center' },
-            { key: '__chart__', label: '走势', width: '52px', align: 'center' }, // ⭐ 新增
-            { key: 'acquiredAt', label: '入库时间', width: '150px', align: 'center' },
-            { key: 'cooldown', label: '剩余冷却时间', width: '160px', align: 'center' },
-            { key: 'count', label: '数量', width: '80px', align: 'center' }
+            { key: '__chart__', label: '走势', width: '52px', align: 'center' },
+            { key: '__price__', label: '售价 (' + symbol + ')', width: '120px', align: 'center' },
+            { key: '__action__', label: '操作', width: '100px', align: 'center' }
         ];
     } else {
         columns = [
             { key: '__check__', label: '☑', width: '36px', align: 'center' },
             { key: '__assetid__', label: '物品ID', align: 'left' },
             { key: 'wear', label: '磨损度', width: '100px', align: 'center' },
-            { key: '__chart__', label: '走势', width: '52px', align: 'center' }, // ⭐ 新增
-            { key: '__sell__', label: '挂单', width: '52px', align: 'center' }, // ⭐ 新增
+            { key: '__chart__', label: '走势', width: '52px', align: 'center' },
+            { key: '__sell__', label: '挂单', width: '52px', align: 'center' },
             { key: '__price__', label: '出售价格 (' + symbol + ')', width: '120px', align: 'center' },
             { key: '__action__', label: '操作', width: '140px', align: 'center' }
         ];
@@ -9480,7 +9581,6 @@ async function showTradeableItemsDialog(caseIndex) {
                                min-width:60px;">⬆ 上架</button>`;
         },
         bind: function (rowEl, rowItem, api) {
-            // ⭐ 用事件委托，避免 input 被重建后事件丢失
             function getRowInput() {
                 return rowEl.querySelector('.item-list-price-input');
             }
@@ -9511,7 +9611,6 @@ async function showTradeableItemsDialog(caseIndex) {
                     btn.title = '请先填写售价';
                 }
 
-                // ⭐ 更新"实收"文字
                 var sellerEl = rowEl.querySelector('.item-list-seller-text');
                 if (sellerEl) {
                     if (valid) {
@@ -9525,7 +9624,6 @@ async function showTradeableItemsDialog(caseIndex) {
                 }
             }
 
-            // ⭐ 事件委托：input / focus / keydown 全部绑在 rowEl 上
             rowEl.addEventListener('input', function (e) {
                 if (e.target && e.target.classList.contains('item-list-price-input')) {
                     updateBtnState();
@@ -9548,7 +9646,6 @@ async function showTradeableItemsDialog(caseIndex) {
                 }
             });
 
-            // ⭐ 按钮点击也走事件委托
             rowEl.addEventListener('click', function (e) {
                 var btn = e.target.closest('.item-list-sell-btn');
                 if (!btn) return;
@@ -9569,12 +9666,9 @@ async function showTradeableItemsDialog(caseIndex) {
                 performSingleSell(item, inventoryData, feeInfo, rowItem.mhn, rowItem.assetid, rowItem.amount);
             });
 
-            // ⭐ 初始化一次，确保按钮初始状态正确
             updateBtnState();
         },
-        // ⭐ 批量上架回调（复用 showItemListDialog 的批量工具条）
         onBatchModify: async function (selected, api) {
-            // selected: [{ item, rowIdx, newPriceCents }, ...]
             if (!selected || selected.length === 0) return;
 
             if (!confirm('确定要批量上架选中的 ' + selected.length + ' 项吗？\n\n每个物品会以各自填写的价格上架。')) {
@@ -9624,7 +9718,7 @@ async function showTradeableItemsDialog(caseIndex) {
                         appid: item.appid,
                         contextid: '2',
                         assetid: rowItem.assetid,
-                        amount: rowItem.amount || 1, // ⭐ 改这里
+                        amount: rowItem.amount || 1,
                         price: feeInfo.sellerAmount
                     };
                     var result = await submitSingleSell(requestData);
@@ -9640,7 +9734,6 @@ async function showTradeableItemsDialog(caseIndex) {
                     failDetails.push(rowItem.assetid + ': ' + e.message);
                 }
 
-                // 每项间隔 1 秒，避免限流
                 if (i < selected.length - 1) {
                     await new Promise(r => setTimeout(r, 1000));
                 }
@@ -9658,7 +9751,6 @@ async function showTradeableItemsDialog(caseIndex) {
                 failCount > 0 ? 'error' : 'warning'
             );
 
-            // ⭐ 清库存缓存，让主面板刷新后拿到最新数据
             cachedInventoryData = null;
             inventoryCacheTime = 0;
             cachedListingsData = null;
@@ -9768,6 +9860,301 @@ console.log('💡 提示: 拖拽面板标题栏可移动面板位置');
 console.log('💡 提示: 点击武器箱名称可跳转到详情页');
 console.log('💡 提示: Ctrl+R 快速刷新数据');
 
+// ============================================================
+// ⭐ 库存总览面板
+// ============================================================
+async function showInventoryOverviewDialog() {
+    var existing = document.getElementById('inv-overview-overlay');
+    if (existing) existing.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'inv-overview-overlay';
+    overlay.style.cssText = `
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.75);
+        z-index: 10005;
+        display: flex; justify-content: center; align-items: center;
+        backdrop-filter: blur(4px);
+    `;
+
+    overlay.innerHTML = `
+        <div style="
+            background: rgba(27, 40, 56, 0.98);
+            border: 1px solid #2a3f5e;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+            display: flex; flex-direction: column;
+            width: 92vw; max-width: 1200px; max-height: 88vh;
+            font-family: 'Motiva Sans', Arial, sans-serif;
+            color: #c6d4df;
+        ">
+            <div style="
+                display: flex; align-items: center; gap: 10px;
+                padding: 14px 20px; border-bottom: 1px solid #2a3f5e;
+            ">
+                <span style="font-size: 15px; font-weight: bold; color: #66c0f4;">📊 库存总览</span>
+                <div style="flex:1;"></div>
+                <input id="inv-overview-search" type="text" placeholder="🔍 搜索物品名称"
+                    style="background: rgba(0,0,0,0.3); color: #c6d4df;
+                           border: 1px solid #2a3f5e; border-radius: 4px;
+                           padding: 4px 10px; font-size: 12px; width: 200px;
+                           font-family: inherit; outline: none;">
+                <button id="inv-overview-refresh" style="
+                    background: #2a3f5e; color: #c6d4df; border: none;
+                    border-radius: 4px; padding: 4px 12px; font-size: 12px;
+                    cursor: pointer; font-family: inherit;">🔄 刷新</button>
+                <button id="inv-overview-close" style="
+                    background: transparent; color: #8b9aab; border: none;
+                    font-size: 20px; cursor: pointer; padding: 0 8px;
+                    line-height: 1; font-family: inherit;">✕</button>
+            </div>
+
+            <div id="inv-overview-stats" style="
+                display: flex; gap: 20px; padding: 12px 20px;
+                border-bottom: 1px solid #1a2634; flex-wrap: wrap;
+                font-size: 12px; color: #8b9aab;
+            "></div>
+
+            <div id="inv-overview-body" style="
+                flex: 1; overflow-y: auto; min-height: 0;
+                scrollbar-width: thin; scrollbar-color: #2a3f5e transparent;
+            ">
+                <div style="text-align:center; padding:40px; color:#8b9aab;">
+                    <div class="loading-spinner"></div>
+                    <div style="margin-top:8px;">加载中...</div>
+                </div>
+            </div>
+
+            <div id="inv-overview-footer" style="
+                display: flex; align-items: center; gap: 10px;
+                padding: 10px 20px; border-top: 1px solid #2a3f5e;
+                flex-wrap: wrap; font-size: 11px;
+            "></div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    var searchInput = overlay.querySelector('#inv-overview-search');
+    var statsEl = overlay.querySelector('#inv-overview-stats');
+    var bodyEl = overlay.querySelector('#inv-overview-body');
+    var footerEl = overlay.querySelector('#inv-overview-footer');
+
+    var state = { page: 1, pageSize: 50, sortBy: 'assetid', keyword: '' };
+
+    async function loadStats() {
+        try {
+            var s = await queryStats();
+            var bySourceHtml = (s.bySource || [])
+                .map(function (x) {
+                    return (
+                        '<span style="color:#8b9aab;">' +
+                        (x.float_source || 'unknown') +
+                        ': <span style="color:#c6d4df;">' +
+                        x.cnt +
+                        '</span></span>'
+                    );
+                })
+                .join(' · ');
+            statsEl.innerHTML =
+                '<span>总数: <span style="color:#66c0f4; font-weight:bold;">' +
+                s.total +
+                '</span></span>' +
+                '<span>有浮点: <span style="color:#8bc34a; font-weight:bold;">' +
+                s.withFloat +
+                '</span></span>' +
+                '<span style="color:#4a5a6a;">|</span>' +
+                (bySourceHtml || '<span style="color:#4a5a6a;">无来源数据</span>');
+        } catch (e) {
+            statsEl.innerHTML = '<span style="color:#ff6b6b;">统计加载失败: ' + e.message + '</span>';
+        }
+    }
+
+    async function loadPage() {
+        bodyEl.innerHTML = '<div style="text-align:center; padding:30px; color:#8b9aab;">加载中...</div>';
+        try {
+            var data = await queryInventory(state.page, state.pageSize, state.sortBy);
+            var items = data.items || [];
+
+            if (state.keyword) {
+                var kw = state.keyword.toLowerCase();
+                items = items.filter(function (it) {
+                    var haystack = [it.market_hash_name || '', it.name || ''].join(' ').toLowerCase();
+                    return haystack.indexOf(kw) !== -1;
+                });
+            }
+
+            if (items.length === 0) {
+                bodyEl.innerHTML =
+                    '<div style="text-align:center; padding:40px; color:#8b9aab; font-style:italic;">暂无数据</div>';
+                footerEl.innerHTML = '';
+                return;
+            }
+
+            var rowsHtml = items
+                .map(function (it) {
+                    var iconUrl = it.icon_url
+                        ? 'https://community.steamstatic.com/economy/image/' + it.icon_url + '/64fx64f'
+                        : '';
+                    var iconHtml = iconUrl
+                        ? '<img src="' + iconUrl + '" style="width:32px; height:32px; flex-shrink:0;" />'
+                        : '<div style="width:32px; height:32px; background:rgba(255,255,255,0.03); border-radius:3px; flex-shrink:0;"></div>';
+
+                    var floatText =
+                        it.float_value !== null && it.float_value !== undefined
+                            ? Number(it.float_value).toFixed(10)
+                            : '--';
+                    var floatColor = '#4a5a6a';
+                    if (it.float_value !== null && it.float_value !== undefined) {
+                        var w = Number(it.float_value);
+                        floatColor =
+                            w < 0.07
+                                ? '#4caf50'
+                                : w < 0.15
+                                  ? '#8bc34a'
+                                  : w < 0.38
+                                    ? '#ffd93d'
+                                    : w < 0.45
+                                      ? '#ff9800'
+                                      : '#ff6b6b';
+                    }
+
+                    var tradableHtml = it.tradable
+                        ? '<span style="color:#8bc34a;">可交易</span>'
+                        : '<span style="color:#8b9aab;">不可交易</span>';
+
+                    return (
+                        '<tr style="border-bottom:1px solid #1a2634;">' +
+                        '<td style="padding:6px 10px;">' +
+                        iconHtml +
+                        '</td>' +
+                        '<td style="padding:6px 10px; font-size:12px; color:#c6d4df;" title="' +
+                        (it.market_hash_name || '') +
+                        '">' +
+                        (it.name || it.market_hash_name || '未知物品') +
+                        '</td>' +
+                        '</td>' +
+                        '<td style="padding:6px 10px; text-align:center;">' +
+                        '<span style="font-family:monospace; color:' +
+                        floatColor +
+                        ';">' +
+                        floatText +
+                        '</span></td>' +
+                        '<td style="padding:6px 10px; text-align:center; font-size:11px;">' +
+                        tradableHtml +
+                        '</td>' +
+                        '<td style="padding:6px 10px; text-align:center; font-size:11px; color:#8b9aab;">' +
+                        (it.first_seen_at || '--') +
+                        '</td>' +
+                        '</tr>'
+                    );
+                })
+                .join('');
+
+            bodyEl.innerHTML =
+                '<table style="width:100%; border-collapse:collapse;">' +
+                '<thead><tr style="position:sticky; top:0; background:rgba(20,30,45,0.98);">' +
+                '<th style="padding:8px 10px; text-align:left; font-size:11px; color:#8b9aab; font-weight:normal; border-bottom:1px solid #2a3f5e; width:50px;">图标</th>' +
+                '<th style="padding:8px 10px; text-align:left; font-size:11px; color:#8b9aab; font-weight:normal; border-bottom:1px solid #2a3f5e;">名称</th>' +
+                '<th style="padding:8px 10px; text-align:center; font-size:11px; color:#8b9aab; font-weight:normal; border-bottom:1px solid #2a3f5e; width:130px;">浮点</th>' +
+                '<th style="padding:8px 10px; text-align:center; font-size:11px; color:#8b9aab; font-weight:normal; border-bottom:1px solid #2a3f5e; width:90px;">状态</th>' +
+                '<th style="padding:8px 10px; text-align:center; font-size:11px; color:#8b9aab; font-weight:normal; border-bottom:1px solid #2a3f5e; width:150px;">首次出现</th>' +
+                '</tr></thead><tbody>' +
+                rowsHtml +
+                '</tbody></table>';
+
+            var totalPages = data.totalPages || 1;
+            var pageBtns = '';
+            var startPage = Math.max(1, state.page - 3);
+            var endPage = Math.min(totalPages, state.page + 3);
+            for (var p = startPage; p <= endPage; p++) {
+                var active = p === state.page;
+                pageBtns +=
+                    '<button class="inv-ov-page-btn" data-page="' +
+                    p +
+                    '" style="' +
+                    'background:' +
+                    (active ? '#66c0f4' : 'transparent') +
+                    ';' +
+                    'color:' +
+                    (active ? '#1a2634' : '#8b9aab') +
+                    ';' +
+                    'border:1px solid #2a3f5e; border-radius:3px; padding:2px 8px;' +
+                    'font-size:11px; cursor:pointer; font-family:inherit;">' +
+                    p +
+                    '</button>';
+            }
+            footerEl.innerHTML =
+                '<button class="inv-ov-page-btn" data-page="' +
+                (state.page - 1) +
+                '" ' +
+                (state.page <= 1 ? 'disabled' : '') +
+                ' style="background:transparent; color:#8b9aab; border:1px solid #2a3f5e; border-radius:3px;' +
+                'padding:2px 8px; font-size:11px; cursor:pointer; font-family:inherit;">◀</button>' +
+                pageBtns +
+                '<button class="inv-ov-page-btn" data-page="' +
+                (state.page + 1) +
+                '" ' +
+                (state.page >= totalPages ? 'disabled' : '') +
+                ' style="background:transparent; color:#8b9aab; border:1px solid #2a3f5e; border-radius:3px;' +
+                'padding:2px 8px; font-size:11px; cursor:pointer; font-family:inherit;">▶</button>' +
+                '<span style="color:#8b9aab; margin-left:8px;">' +
+                state.page +
+                '/' +
+                totalPages +
+                ' (共 ' +
+                data.total +
+                ' 条)' +
+                '</span>';
+        } catch (e) {
+            bodyEl.innerHTML =
+                '<div style="text-align:center; padding:40px; color:#ff6b6b;">加载失败: ' + e.message + '</div>';
+        }
+    }
+
+    overlay.addEventListener('click', function (e) {
+        var btn = e.target.closest('.inv-ov-page-btn');
+        if (btn) {
+            var p = parseInt(btn.dataset.page);
+            if (!isNaN(p) && p >= 1) {
+                state.page = p;
+                loadPage();
+            }
+        }
+    });
+
+    searchInput.addEventListener('input', function () {
+        state.keyword = this.value.trim();
+        state.page = 1;
+        loadPage();
+    });
+
+    overlay.querySelector('#inv-overview-refresh').addEventListener('click', function () {
+        state.page = 1;
+        loadStats();
+        loadPage();
+    });
+
+    overlay.querySelector('#inv-overview-close').addEventListener('click', function () {
+        overlay.remove();
+    });
+
+    overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) overlay.remove();
+    });
+
+    var escHandler = function (e) {
+        if (e.key === 'Escape') {
+            overlay.remove();
+            document.removeEventListener('keydown', escHandler);
+        }
+    };
+    document.addEventListener('keydown', escHandler);
+
+    loadStats();
+    loadPage();
+}
+
 // ⭐ 暴露到页面的 window，控制台才能访问
 var __invExports = {
     // 库存
@@ -9811,6 +10198,12 @@ var __invExports = {
     getItemIconUrl: getItemIconUrl,
     buildCooldownDeadline: buildCooldownDeadline,
     sTradableProtected: isTradableProtected,
+    howInventoryOverviewDialog: showInventoryOverviewDialog,
+    // ⭐ 库存管理 API
+    queryFloatsBatch: queryFloatsBatch,
+    queryStats: queryStats,
+    queryInventory: queryInventory,
+    FLOAT_API_BASE: FLOAT_API_BASE,
 
     // 常量
     WEAPON_CASES: WEAPON_CASES,
